@@ -1,0 +1,7 @@
+{
+  "name": "driving-school-api",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "server.js",
+  ...
+}
