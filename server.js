@@ -19,8 +19,11 @@ app.get("/", (req, res) => {
 // Read routes
 app.use("/read", readRoutes);
 
-// Write routes
-app.use("/write", writeRoutes);
+// Write routesapp.post("/ping", (req, res) => {
+  console.log("Ping hit");
+  res.json({ ok: true });
+});
+
 
 const PORT = process.env.PORT || 5173;
 
