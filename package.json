@@ -2,11 +2,9 @@
   "name": "driving-school-api",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "server.js",
   "scripts": {
-  "start": "node server.js"
-}
-
+    "start": "node server.js"
   },
   "keywords": [],
   "author": "",
@@ -18,3 +16,4 @@
     "pg": "^8.18.0"
   }
 }
+
