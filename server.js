@@ -17,7 +17,8 @@ app.get('/', (req, res) => {
 
 const PORT = process.env.PORT || 5173;
 
-app.listen(5173, '0.0.0.0', () => {
-  console.log('API running on port 5173');
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`API running on port ${PORT}`);
 });
+
 
