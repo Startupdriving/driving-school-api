@@ -3,15 +3,12 @@ import dotenv from "dotenv";
 import readRoutes from "./routes/read.js";
 import writeRoutes from "./routes/write.js";
 
-// Load environment variables
 dotenv.config();
 
 const app = express();
 
-// Middleware
 app.use(express.json());
 
-// Root route
 app.get("/", (req, res) => {
   res.send("API running");
 });
@@ -19,11 +16,8 @@ app.get("/", (req, res) => {
 // Read routes
 app.use("/read", readRoutes);
 
-// Write routesapp.post("/ping", (req, res) => {
-  console.log("Ping hit");
-  res.json({ ok: true });
-});
-
+// Write routes
+app.use("/write", writeRoutes);
 
 const PORT = process.env.PORT || 5173;
 
