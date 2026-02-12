@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const pool = require('../db');
+import pool from '../db.js';
 
 /**
  * GET active students
