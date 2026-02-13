@@ -1,3 +1,4 @@
+import { runMigrations } from "./db/migrate.js";
 import express from "express";
 import dotenv from "dotenv";
 import readRoutes from "./routes/read.js";
@@ -21,7 +22,10 @@ app.use("/write", writeRoutes);
 
 const PORT = process.env.PORT || 5173;
 
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`API running on port ${PORT}`);
+runMigrations().then(() => {
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`API running on port ${PORT}`);
+  });
 });
+
 
