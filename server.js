@@ -1,3 +1,4 @@
+import instructorRoutes from "./routes/instructor.js";
 import { runMigrations } from "./db/migrate.js";
 import express from "express";
 import dotenv from "dotenv";
@@ -19,6 +20,7 @@ app.use("/read", readRoutes);
 
 // Write routes
 app.use("/write", writeRoutes);
+app.use("/write/instructor", instructorRoutes);
 
 const PORT = process.env.PORT || 5173;
 
