@@ -53,11 +53,32 @@ export async function createStudent(req, res) {
 // ACTIVATE STUDENT
 export async function activateStudent(req, res) {
   const { student_id } = req.body;
+
+  if (!student_id) {
+    return res.status(400).json({ error: "student_id is required" });
+  }
+
+  if (!isValidUUID(student_id)) {
+    return res.status(400).json({ error: "student_id must be a valid UUID" });
+  }
+
   const client = await pool.connect();
 
   try {
     await client.query("BEGIN");
 
+    // 🔍 Check if already active
+    const activeCheck = await client.query(
+      `SELECT 1 FROM current_active_students WHERE id = $1`,
+      [student_id]
+    );
+
+    if (activeCheck.rowCount > 0) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "Student already active" });
+    }
+
+    // Insert activation event
     await client.query(
       `INSERT INTO event (id, identity_id, event_type, payload)
        VALUES ($1, $2, 'student_activated', $3)`,
@@ -76,13 +97,34 @@ export async function activateStudent(req, res) {
   }
 }
 
+
 // DEACTIVATE STUDENT
 export async function deactivateStudent(req, res) {
   const { student_id } = req.body;
+
+  if (!student_id) {
+    return res.status(400).json({ error: "student_id is required" });
+  }
+
+  if (!isValidUUID(student_id)) {
+    return res.status(400).json({ error: "student_id must be a valid UUID" });
+  }
+
   const client = await pool.connect();
 
   try {
     await client.query("BEGIN");
+
+    // 🔍 Check if currently active
+    const activeCheck = await client.query(
+      `SELECT 1 FROM current_active_students WHERE id = $1`,
+      [student_id]
+    );
+
+    if (activeCheck.rowCount === 0) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "Student already inactive" });
+    }
 
     await client.query(
       `INSERT INTO event (id, identity_id, event_type, payload)
@@ -101,3 +143,4 @@ export async function deactivateStudent(req, res) {
     client.release();
   }
 }
+
