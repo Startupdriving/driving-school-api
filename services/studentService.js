@@ -79,11 +79,20 @@ export async function activateStudent(req, res) {
     }
 
     // Insert activation event
-    await client.query(
-      `INSERT INTO event (id, identity_id, event_type, payload)
-       VALUES ($1, $2, 'student_activated', $3)`,
-      [generateUUID(), student_id, {}]
-    );
+      await client.query(
+  `INSERT INTO event (id, identity_id, event_type, payload)
+   VALUES ($1, $2, 'student_activated', $3::jsonb)`,
+  [
+    generateUUID(),
+    student_id,
+    JSON.stringify({
+      performed_by: "system",
+      source: "api",
+      action: "student_activated"
+    })
+  ]
+);
+
 
     await client.query("COMMIT");
 
@@ -127,10 +136,19 @@ export async function deactivateStudent(req, res) {
     }
 
     await client.query(
-      `INSERT INTO event (id, identity_id, event_type, payload)
-       VALUES ($1, $2, 'student_deactivated', $3)`,
-      [generateUUID(), student_id, {}]
-    );
+  `INSERT INTO event (id, identity_id, event_type, payload)
+   VALUES ($1, $2, 'student_activated', $3::jsonb)`,
+  [
+    generateUUID(),
+    student_id,
+    JSON.stringify({
+      performed_by: "system",
+      source: "api",
+      action: "student_activated"
+    })
+  ]
+);
+
 
     await client.query("COMMIT");
 
