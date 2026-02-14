@@ -20,3 +20,15 @@ router.get("/students/active", async (req, res) => {
 
 export default router;
 
+// GET active instructors
+router.get('/instructors/active', async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM current_active_instructors'
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
