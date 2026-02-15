@@ -34,10 +34,10 @@ router.get('/instructors/active', async (req, res) => {
 });
 
 // GET available cars
-router.get('/cars/available', async (req, res) => {
+router.get('/cars/active', async (req, res) => {
   try {
     const result = await pool.query(
-      'SELECT * FROM available_cars'
+      "SELECT * FROM current_active_cars"
     );
     res.json(result.rows);
   } catch (err) {
@@ -45,3 +45,4 @@ router.get('/cars/available', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
