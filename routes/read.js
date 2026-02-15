@@ -32,3 +32,16 @@ router.get('/instructors/active', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// GET available cars
+router.get('/cars/available', async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM available_cars'
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
