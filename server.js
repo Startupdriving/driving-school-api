@@ -1,3 +1,4 @@
+import carRoutes from "./routes/car.js";
 import instructorRoutes from "./routes/instructor.js";
 import { runMigrations } from "./db/migrate.js";
 import express from "express";
@@ -21,6 +22,7 @@ app.use("/read", readRoutes);
 // Write routes
 app.use("/write", writeRoutes);
 app.use("/write/instructor", instructorRoutes);
+app.use("/write/car", carRoutes);
 
 const PORT = process.env.PORT || 5173;
 
