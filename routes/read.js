@@ -57,3 +57,27 @@ router.get('/lessons/scheduled', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// Instructor stats
+router.get('/stats/instructors', async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM instructor_lesson_stats'
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Student stats
+router.get('/stats/students', async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM student_lesson_stats'
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
