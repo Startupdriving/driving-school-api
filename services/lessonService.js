@@ -151,3 +151,85 @@ export async function scheduleLesson(req, res) {
     client.release();
   }
 }
+
+export async function cancelLesson(req, res) {
+  const { lesson_id } = req.body;
+
+  if (!lesson_id) {
+    return res.status(400).json({ error: "lesson_id is required" });
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    // Check if lesson exists
+    const lessonCheck = await client.query(
+      `SELECT 1 FROM identity 
+       WHERE id = $1 AND identity_type = 'lesson'`,
+      [lesson_id]
+    );
+
+    if (lessonCheck.rowCount === 0) {
+      throw new Error("Lesson not found");
+    }
+
+    // Insert cancellation event
+    await client.query(
+      `INSERT INTO event (id, identity_id, event_type, payload)
+       VALUES ($1, $2, 'lesson_cancelled', '{}'::jsonb)`,
+      [crypto.randomUUID(), lesson_id]
+    );
+
+    await client.query("COMMIT");
+
+    res.json({ message: "Lesson cancelled" });
+
+  } catch (err) {
+    await client.query("ROLLBACK");
+    res.status(400).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+}
+
+export async function completeLesson(req, res) {
+  const { lesson_id } = req.body;
+
+  if (!lesson_id) {
+    return res.status(400).json({ error: "lesson_id is required" });
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    const lessonCheck = await client.query(
+      `SELECT 1 FROM identity 
+       WHERE id = $1 AND identity_type = 'lesson'`,
+      [lesson_id]
+    );
+
+    if (lessonCheck.rowCount === 0) {
+      throw new Error("Lesson not found");
+    }
+
+    await client.query(
+      `INSERT INTO event (id, identity_id, event_type, payload)
+       VALUES ($1, $2, 'lesson_completed', '{}'::jsonb)`,
+      [crypto.randomUUID(), lesson_id]
+    );
+
+    await client.query("COMMIT");
+
+    res.json({ message: "Lesson completed" });
+
+  } catch (err) {
+    await client.query("ROLLBACK");
+    res.status(400).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+}

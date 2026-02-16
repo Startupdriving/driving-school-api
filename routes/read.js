@@ -46,3 +46,14 @@ router.get('/cars/active', async (req, res) => {
   }
 });
 
+// GET scheduled lessons
+router.get('/lessons/scheduled', async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM current_scheduled_lessons'
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
