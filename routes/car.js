@@ -1,5 +1,5 @@
 import express from "express";
- import {
+import {
   createCar,
   activateCar,
   setCarAvailability
@@ -12,3 +12,4 @@ router.post("/activate", activateCar);
 router.post("/availability", setCarAvailability);
 
 export default router;
+
