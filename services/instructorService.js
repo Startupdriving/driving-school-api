@@ -107,3 +107,54 @@ export async function activateInstructor(req, res) {
     client.release();
   }
 }
+
+export async function setInstructorAvailability(req, res) {
+  const { instructor_id, day_of_week, start_time, end_time } = req.body;
+
+  if (!instructor_id || day_of_week === undefined || !start_time || !end_time) {
+    return res.status(400).json({ error: "All fields required" });
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    // Ensure instructor exists
+    const check = await client.query(
+      `SELECT 1 FROM identity 
+       WHERE id = $1 AND identity_type = 'instructor'`,
+      [instructor_id]
+    );
+
+    if (check.rowCount === 0) {
+      throw new Error("Instructor not found");
+    }
+
+    await client.query(
+      `
+      INSERT INTO event (id, identity_id, event_type, payload)
+      VALUES ($1, $2, 'instructor_availability_set', $3::jsonb)
+      `,
+      [
+        crypto.randomUUID(),
+        instructor_id,
+        JSON.stringify({
+          day_of_week,
+          start_time,
+          end_time
+        })
+      ]
+    );
+
+    await client.query("COMMIT");
+
+    res.json({ message: "Availability added" });
+
+  } catch (err) {
+    await client.query("ROLLBACK");
+    res.status(400).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+}
