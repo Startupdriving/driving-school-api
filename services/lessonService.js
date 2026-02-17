@@ -49,6 +49,31 @@ export async function scheduleLesson(req, res) {
       throw new Error("Instructor not active");
     }
 
+    // 3️⃣ Validate instructor availability window
+
+    const availabilityCheck = await client.query(
+      `
+      SELECT 1
+      FROM event e
+      WHERE e.identity_id = $1
+      AND e.event_type = 'instructor_availability_set'
+      AND (e.payload->>'day_of_week')::int = EXTRACT(DOW FROM $2::timestamptz)
+      AND $3::time >= (e.payload->>'start_time')::time
+      AND $4::time <= (e.payload->>'end_time')::time
+      `,
+      [
+        instructor_id,
+        start_time,
+        start_time.split("T")[1].substring(0,5),
+        end_time.split("T")[1].substring(0,5)
+      ]
+    );
+
+    if (availabilityCheck.rowCount === 0) {
+      throw new Error("Instructor not available during requested time");
+    }
+
+
     // 3️⃣ Validate active car
     const carCheck = await client.query(
       `SELECT 1 FROM current_active_cars WHERE id = $1`,
