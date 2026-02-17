@@ -73,9 +73,10 @@ export async function activateCar(req, res) {
     await client.query("BEGIN");
 
     const activeCheck = await client.query(
-      `SELECT 1 FROM available_cars WHERE id = $1`,
-      [car_id]
-    );
+  `SELECT 1 FROM current_active_cars WHERE id = $1`,
+  [car_id]
+);
+
 
     if (activeCheck.rowCount > 0) {
       await client.query("ROLLBACK");
