@@ -49,6 +49,16 @@ export async function scheduleLesson(req, res) {
       throw new Error("Instructor not active");
     }
 
+ // 3️⃣ Validate active car
+    const carCheck = await client.query(
+      `SELECT 1 FROM current_active_cars WHERE id = $1`,
+      [car_id]
+    );
+
+    if (carCheck.rowCount === 0) {
+      throw new Error("Car not active");
+    }
+
     // 3️⃣ Validate instructor availability window
 
     const availabilityCheck = await client.query(
@@ -73,16 +83,30 @@ export async function scheduleLesson(req, res) {
       throw new Error("Instructor not available during requested time");
     }
 
+    // 4️⃣ Validate car availability window
 
-    // 3️⃣ Validate active car
-    const carCheck = await client.query(
-      `SELECT 1 FROM current_active_cars WHERE id = $1`,
-      [car_id]
+    const carAvailabilityCheck = await client.query(
+      `
+      SELECT 1
+      FROM event e
+      WHERE e.identity_id = $1
+      AND e.event_type = 'car_availability_set'
+      AND (e.payload->>'day_of_week')::int = EXTRACT(DOW FROM $2::timestamptz)
+      AND $3::time >= (e.payload->>'start_time')::time
+      AND $4::time <= (e.payload->>'end_time')::time
+      `,
+      [
+        car_id,
+        start_time,
+        start_time.split("T")[1].substring(0,5),
+        end_time.split("T")[1].substring(0,5)
+      ]
     );
 
-    if (carCheck.rowCount === 0) {
-      throw new Error("Car not active");
+    if (carAvailabilityCheck.rowCount === 0) {
+      throw new Error("Car not available during requested time");
     }
+
 
     // 4️⃣ Check instructor overlap
     const instructorConflict = await client.query(
