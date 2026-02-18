@@ -1,59 +1,56 @@
 -- ============================================
 -- MIGRATION 011
--- Lesson Projection + Index Hardening
--- (Generated Columns + Range Optimization)
+-- Lesson Projection + Proper Index Strategy
 -- ============================================
 
 BEGIN;
 
 -- ============================================
--- 1️⃣ ADD GENERATED COLUMNS (FAIL FAST)
+-- 1️⃣ ADD REAL COLUMNS (NOT GENERATED)
 -- ============================================
 
 ALTER TABLE event
-ADD COLUMN instructor_id_uuid uuid
-GENERATED ALWAYS AS (
-    CASE
-        WHEN event_type = 'lesson_scheduled'
-        THEN (payload->>'instructor_id')::uuid
-        ELSE NULL
-    END
-) STORED;
+ADD COLUMN IF NOT EXISTS instructor_id uuid;
 
 ALTER TABLE event
-ADD COLUMN car_id_uuid uuid
-GENERATED ALWAYS AS (
-    CASE
-        WHEN event_type = 'lesson_scheduled'
-        THEN (payload->>'car_id')::uuid
-        ELSE NULL
-    END
-) STORED;
+ADD COLUMN IF NOT EXISTS car_id uuid;
 
 ALTER TABLE event
-ADD COLUMN lesson_range tstzrange
-GENERATED ALWAYS AS (
-    CASE
-        WHEN event_type = 'lesson_scheduled'
-        THEN tstzrange(
-            (payload->>'start_time')::timestamptz,
-            (payload->>'end_time')::timestamptz
-        )
-        ELSE NULL
-    END
-) STORED;
+ADD COLUMN IF NOT EXISTS lesson_range tstzrange;
 
 -- ============================================
--- 2️⃣ CURRENT SCHEDULED LESSONS VIEW
+-- 2️⃣ BACKFILL EXISTING LESSON EVENTS
 -- ============================================
 
-CREATE OR REPLACE VIEW current_scheduled_lessons AS
+UPDATE event
+SET instructor_id = (payload->>'instructor_id')::uuid,
+    car_id        = (payload->>'car_id')::uuid,
+    lesson_range  = tstzrange(
+        (payload->>'start_time')::timestamptz,
+        (payload->>'end_time')::timestamptz
+    )
+WHERE event_type = 'lesson_scheduled'
+AND lesson_range IS NULL;
+
+-- ============================================
+-- 3️⃣ DROP OLD VIEWS SAFELY
+-- ============================================
+
+DROP VIEW IF EXISTS instructor_current_schedule CASCADE;
+DROP VIEW IF EXISTS car_current_schedule CASCADE;
+DROP VIEW IF EXISTS current_scheduled_lessons CASCADE;
+
+-- ============================================
+-- 4️⃣ RECREATE PROJECTIONS USING REAL COLUMNS
+-- ============================================
+
+CREATE VIEW current_scheduled_lessons AS
 SELECT e.identity_id,
-       (e.payload->>'student_id')::uuid  AS student_id,
-       e.instructor_id_uuid             AS instructor_id,
-       e.car_id_uuid                    AS car_id,
-       lower(e.lesson_range)            AS start_time,
-       upper(e.lesson_range)            AS end_time,
+       (e.payload->>'student_id')::uuid AS student_id,
+       e.instructor_id,
+       e.car_id,
+       lower(e.lesson_range) AS start_time,
+       upper(e.lesson_range) AS end_time,
        e.created_at
 FROM event e
 WHERE e.event_type = 'lesson_scheduled'
@@ -64,22 +61,14 @@ AND NOT EXISTS (
       AND e2.event_type IN ('lesson_canceled', 'lesson_completed')
 );
 
--- ============================================
--- 3️⃣ INSTRUCTOR CURRENT SCHEDULE VIEW
--- ============================================
-
-CREATE OR REPLACE VIEW instructor_current_schedule AS
+CREATE VIEW instructor_current_schedule AS
 SELECT instructor_id,
        start_time,
        end_time,
        identity_id AS lesson_id
 FROM current_scheduled_lessons;
 
--- ============================================
--- 4️⃣ CAR CURRENT SCHEDULE VIEW
--- ============================================
-
-CREATE OR REPLACE VIEW car_current_schedule AS
+CREATE VIEW car_current_schedule AS
 SELECT car_id,
        start_time,
        end_time,
@@ -87,7 +76,7 @@ SELECT car_id,
 FROM current_scheduled_lessons;
 
 -- ============================================
--- 5️⃣ BASE EVENT INDEXES
+-- 5️⃣ BASE INDEXES
 -- ============================================
 
 CREATE INDEX IF NOT EXISTS idx_event_identity_id
@@ -97,19 +86,19 @@ CREATE INDEX IF NOT EXISTS idx_event_identity_event_type
 ON event(identity_id, event_type);
 
 -- ============================================
--- 6️⃣ RANGE INDEXES (GIST + GENERATED COLUMNS)
+-- 6️⃣ RANGE INDEXES (NOW SAFE)
 -- ============================================
 
 CREATE EXTENSION IF NOT EXISTS btree_gist;
 
 CREATE INDEX IF NOT EXISTS idx_event_instructor_range
 ON event
-USING GIST (instructor_id_uuid, lesson_range)
+USING GIST (instructor_id, lesson_range)
 WHERE event_type = 'lesson_scheduled';
 
 CREATE INDEX IF NOT EXISTS idx_event_car_range
 ON event
-USING GIST (car_id_uuid, lesson_range)
+USING GIST (car_id, lesson_range)
 WHERE event_type = 'lesson_scheduled';
 
 -- ============================================
