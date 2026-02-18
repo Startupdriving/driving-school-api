@@ -1,3 +1,17 @@
+import pool from "../db.js";
+import crypto from "crypto";
+
+function generateUUID() {
+  return crypto.randomUUID();
+}
+
+function isValidUUID(id) {
+  const uuidRegex =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  return uuidRegex.test(id);
+}
+
+
 export async function scheduleLesson(req, res) {
   const {
     student_id,
@@ -207,3 +221,84 @@ export async function scheduleLesson(req, res) {
   }
 }
 
+
+export async function cancelLesson(req, res) {
+  const { lesson_id } = req.body;
+
+  if (!lesson_id) {
+    return res.status(400).json({ error: "lesson_id is required" });
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    const lessonCheck = await client.query(
+      `SELECT 1 FROM identity
+       WHERE id = $1 AND identity_type = 'lesson'`,
+      [lesson_id]
+    );
+
+    if (lessonCheck.rowCount === 0) {
+      throw new Error("Lesson not found");
+    }
+
+    await client.query(
+      `INSERT INTO event (id, identity_id, event_type, payload)
+       VALUES ($1, $2, 'lesson_canceled', '{}'::jsonb)`,
+      [crypto.randomUUID(), lesson_id]
+    );
+
+    await client.query("COMMIT");
+
+    res.json({ message: "Lesson canceled", lesson_id });
+
+  } catch (err) {
+    await client.query("ROLLBACK");
+    res.status(400).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+}
+
+
+export async function completeLesson(req, res) {
+  const { lesson_id } = req.body;
+
+  if (!lesson_id) {
+    return res.status(400).json({ error: "lesson_id is required" });
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    const lessonCheck = await client.query(
+      `SELECT 1 FROM identity
+       WHERE id = $1 AND identity_type = 'lesson'`,
+      [lesson_id]
+    );
+
+    if (lessonCheck.rowCount === 0) {
+      throw new Error("Lesson not found");
+    }
+
+    await client.query(
+      `INSERT INTO event (id, identity_id, event_type, payload)
+       VALUES ($1, $2, 'lesson_completed', '{}'::jsonb)`,
+      [crypto.randomUUID(), lesson_id]
+    );
+
+    await client.query("COMMIT");
+
+    res.json({ message: "Lesson completed", lesson_id });
+
+  } catch (err) {
+    await client.query("ROLLBACK");
+    res.status(400).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+}
