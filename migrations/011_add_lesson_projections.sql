@@ -1,29 +1,59 @@
 -- ============================================
 -- MIGRATION 011
--- Lesson Projection + Index Hardening (IMMUTABLE SAFE)
+-- Lesson Projection + Index Hardening
+-- (Generated Columns + Range Optimization)
 -- ============================================
 
 BEGIN;
 
 -- ============================================
--- DROP VIEWS IF THEY EXIST
+-- 1️⃣ ADD GENERATED COLUMNS (FAIL FAST)
 -- ============================================
 
-DROP VIEW IF EXISTS instructor_current_schedule CASCADE;
-DROP VIEW IF EXISTS car_current_schedule CASCADE;
-DROP VIEW IF EXISTS current_scheduled_lessons CASCADE;
+ALTER TABLE event
+ADD COLUMN instructor_id_uuid uuid
+GENERATED ALWAYS AS (
+    CASE
+        WHEN event_type = 'lesson_scheduled'
+        THEN (payload->>'instructor_id')::uuid
+        ELSE NULL
+    END
+) STORED;
+
+ALTER TABLE event
+ADD COLUMN car_id_uuid uuid
+GENERATED ALWAYS AS (
+    CASE
+        WHEN event_type = 'lesson_scheduled'
+        THEN (payload->>'car_id')::uuid
+        ELSE NULL
+    END
+) STORED;
+
+ALTER TABLE event
+ADD COLUMN lesson_range tstzrange
+GENERATED ALWAYS AS (
+    CASE
+        WHEN event_type = 'lesson_scheduled'
+        THEN tstzrange(
+            (payload->>'start_time')::timestamptz,
+            (payload->>'end_time')::timestamptz
+        )
+        ELSE NULL
+    END
+) STORED;
 
 -- ============================================
--- CURRENT SCHEDULED LESSONS VIEW
+-- 2️⃣ CURRENT SCHEDULED LESSONS VIEW
 -- ============================================
 
-CREATE VIEW current_scheduled_lessons AS
+CREATE OR REPLACE VIEW current_scheduled_lessons AS
 SELECT e.identity_id,
-       (e.payload->>'student_id')::uuid        AS student_id,
-       (e.payload->>'instructor_id')::uuid     AS instructor_id,
-       (e.payload->>'car_id')::uuid            AS car_id,
-       (e.payload->>'start_time')::timestamptz AS start_time,
-       (e.payload->>'end_time')::timestamptz   AS end_time,
+       (e.payload->>'student_id')::uuid  AS student_id,
+       e.instructor_id_uuid             AS instructor_id,
+       e.car_id_uuid                    AS car_id,
+       lower(e.lesson_range)            AS start_time,
+       upper(e.lesson_range)            AS end_time,
        e.created_at
 FROM event e
 WHERE e.event_type = 'lesson_scheduled'
@@ -35,10 +65,10 @@ AND NOT EXISTS (
 );
 
 -- ============================================
--- INSTRUCTOR CURRENT SCHEDULE VIEW
+-- 3️⃣ INSTRUCTOR CURRENT SCHEDULE VIEW
 -- ============================================
 
-CREATE VIEW instructor_current_schedule AS
+CREATE OR REPLACE VIEW instructor_current_schedule AS
 SELECT instructor_id,
        start_time,
        end_time,
@@ -46,10 +76,10 @@ SELECT instructor_id,
 FROM current_scheduled_lessons;
 
 -- ============================================
--- CAR CURRENT SCHEDULE VIEW
+-- 4️⃣ CAR CURRENT SCHEDULE VIEW
 -- ============================================
 
-CREATE VIEW car_current_schedule AS
+CREATE OR REPLACE VIEW car_current_schedule AS
 SELECT car_id,
        start_time,
        end_time,
@@ -57,7 +87,7 @@ SELECT car_id,
 FROM current_scheduled_lessons;
 
 -- ============================================
--- BASE EVENT INDEXES
+-- 5️⃣ BASE EVENT INDEXES
 -- ============================================
 
 CREATE INDEX IF NOT EXISTS idx_event_identity_id
@@ -67,35 +97,23 @@ CREATE INDEX IF NOT EXISTS idx_event_identity_event_type
 ON event(identity_id, event_type);
 
 -- ============================================
--- RANGE INDEXES (IMMUTABLE SAFE)
+-- 6️⃣ RANGE INDEXES (GIST + GENERATED COLUMNS)
 -- ============================================
 
 CREATE EXTENSION IF NOT EXISTS btree_gist;
 
 CREATE INDEX IF NOT EXISTS idx_event_instructor_range
 ON event
-USING GIST (
-    ((payload->>'instructor_id')::uuid),
-    tstzrange(
-        (payload->>'start_time')::timestamptz,
-        (payload->>'end_time')::timestamptz
-    )
-)
+USING GIST (instructor_id_uuid, lesson_range)
 WHERE event_type = 'lesson_scheduled';
 
 CREATE INDEX IF NOT EXISTS idx_event_car_range
 ON event
-USING GIST (
-    ((payload->>'car_id')::uuid),
-    tstzrange(
-        (payload->>'start_time')::timestamptz,
-        (payload->>'end_time')::timestamptz
-    )
-)
+USING GIST (car_id_uuid, lesson_range)
 WHERE event_type = 'lesson_scheduled';
 
 -- ============================================
--- RECORD SCHEMA VERSION
+-- 7️⃣ RECORD SCHEMA VERSION
 -- ============================================
 
 INSERT INTO schema_version(version, applied_at)
