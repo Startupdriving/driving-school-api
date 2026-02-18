@@ -6,14 +6,22 @@
 BEGIN;
 
 -- ============================================
+-- DROP VIEWS IF THEY EXIST (to avoid column rename conflict)
+-- ============================================
+
+DROP VIEW IF EXISTS instructor_current_schedule CASCADE;
+DROP VIEW IF EXISTS car_current_schedule CASCADE;
+DROP VIEW IF EXISTS current_scheduled_lessons CASCADE;
+
+-- ============================================
 -- 1️⃣ CURRENT SCHEDULED LESSONS VIEW
 -- ============================================
 
-CREATE OR REPLACE VIEW current_scheduled_lessons AS
+CREATE VIEW current_scheduled_lessons AS
 SELECT e.identity_id,
-       (e.payload->>'student_id')::uuid     AS student_id,
-       (e.payload->>'instructor_id')::uuid  AS instructor_id,
-       (e.payload->>'car_id')::uuid         AS car_id,
+       (e.payload->>'student_id')::uuid      AS student_id,
+       (e.payload->>'instructor_id')::uuid   AS instructor_id,
+       (e.payload->>'car_id')::uuid          AS car_id,
        (e.payload->>'start_time')::timestamp AS start_time,
        (e.payload->>'end_time')::timestamp   AS end_time,
        e.created_at
@@ -30,7 +38,7 @@ AND NOT EXISTS (
 -- 2️⃣ INSTRUCTOR CURRENT SCHEDULE VIEW
 -- ============================================
 
-CREATE OR REPLACE VIEW instructor_current_schedule AS
+CREATE VIEW instructor_current_schedule AS
 SELECT instructor_id,
        start_time,
        end_time,
@@ -41,7 +49,7 @@ FROM current_scheduled_lessons;
 -- 3️⃣ CAR CURRENT SCHEDULE VIEW
 -- ============================================
 
-CREATE OR REPLACE VIEW car_current_schedule AS
+CREATE VIEW car_current_schedule AS
 SELECT car_id,
        start_time,
        end_time,
@@ -87,7 +95,7 @@ USING GIST (
 WHERE event_type = 'lesson_scheduled';
 
 -- ============================================
--- 6️⃣ RECORD SCHEMA VERSION
+-- RECORD SCHEMA VERSION
 -- ============================================
 
 INSERT INTO schema_version(version, applied_at)
@@ -95,3 +103,4 @@ VALUES (11, NOW())
 ON CONFLICT (version) DO NOTHING;
 
 COMMIT;
+
