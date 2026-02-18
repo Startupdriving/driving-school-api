@@ -169,22 +169,36 @@ export async function scheduleLesson(req, res) {
 
     // 7️⃣ Insert lesson_scheduled event
     await client.query(
-      `
-      INSERT INTO event (id, identity_id, event_type, payload)
-      VALUES ($1, $2, 'lesson_scheduled', $3::jsonb)
-      `,
-      [
-        generateUUID(),
-        lessonId,
-        JSON.stringify({
-          student_id,
-          instructor_id,
-          car_id,
-          start_time,
-          end_time
-        })
-      ]
-    );
+  `
+  INSERT INTO event (
+    id,
+    identity_id,
+    event_type,
+    payload,
+    instructor_id,
+    car_id,
+    lesson_range
+  )
+  VALUES (
+    gen_random_uuid(),
+    $1,
+    'lesson_scheduled',
+    $2,
+    $3,
+    $4,
+    tstzrange($5::timestamptz, $6::timestamptz)
+  )
+  `,
+  [
+    lessonId,
+    payload,
+    instructorId,
+    carId,
+    startTime,
+    endTime
+  ]
+);
+
 
     await client.query("COMMIT");
 
