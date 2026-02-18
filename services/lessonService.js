@@ -454,9 +454,3 @@ export async function rescheduleLesson(req, res) {
 }
 
 
-export {
-  scheduleLesson,
-  cancelLesson,
-  completeLesson,
-  rescheduleLesson
-};
