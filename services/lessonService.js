@@ -302,3 +302,161 @@ export async function completeLesson(req, res) {
     client.release();
   }
 }
+
+
+export async function rescheduleLesson(req, res) {
+  const { lesson_id, start_time, end_time } = req.body;
+
+  if (!lesson_id || !start_time || !end_time) {
+    return res.status(400).json({ error: "lesson_id, start_time and end_time are required" });
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    // 1️⃣ Verify original lesson exists and is currently scheduled
+    const lessonCheck = await client.query(
+      `
+      SELECT *
+      FROM current_scheduled_lessons
+      WHERE identity_id = $1
+      `,
+      [lesson_id]
+    );
+
+    if (lessonCheck.rowCount === 0) {
+      throw new Error("Original lesson not found or not active");
+    }
+
+    const original = lessonCheck.rows[0];
+
+    const studentId = original.student_id;
+    const instructorId = original.instructor_id;
+    const carId = original.car_id;
+
+    // 2️⃣ Cancel old lesson
+    await client.query(
+      `
+      INSERT INTO event (id, identity_id, event_type, payload)
+      VALUES ($1, $2, 'lesson_cancelled', '{}'::jsonb)
+      `,
+      [crypto.randomUUID(), lesson_id]
+    );
+
+    // 3️⃣ Generate new lesson ID
+    const newLessonId = generateUUID();
+
+    // 4️⃣ Create new identity
+    await client.query(
+      `
+      INSERT INTO identity (id, identity_type)
+      VALUES ($1, 'lesson')
+      `,
+      [newLessonId]
+    );
+
+    // 5️⃣ Overlap validation (skip old lesson because already cancelled)
+
+    const instructorConflict = await client.query(
+      `
+      SELECT 1
+      FROM event e
+      WHERE e.event_type = 'lesson_scheduled'
+        AND e.instructor_id = $1
+        AND e.lesson_range && tstzrange($2::timestamptz, $3::timestamptz)
+        AND NOT EXISTS (
+          SELECT 1 FROM event c
+          WHERE c.identity_id = e.identity_id
+            AND c.event_type = 'lesson_cancelled'
+        )
+      `,
+      [instructorId, start_time, end_time]
+    );
+
+    if (instructorConflict.rowCount > 0) {
+      throw new Error("Instructor already booked for this time");
+    }
+
+    const carConflict = await client.query(
+      `
+      SELECT 1
+      FROM event e
+      WHERE e.event_type = 'lesson_scheduled'
+        AND e.car_id = $1
+        AND e.lesson_range && tstzrange($2::timestamptz, $3::timestamptz)
+        AND NOT EXISTS (
+          SELECT 1 FROM event c
+          WHERE c.identity_id = e.identity_id
+            AND c.event_type = 'lesson_cancelled'
+        )
+      `,
+      [carId, start_time, end_time]
+    );
+
+    if (carConflict.rowCount > 0) {
+      throw new Error("Car already booked for this time");
+    }
+
+    // 6️⃣ Insert new lesson_scheduled
+    await client.query(
+      `
+      INSERT INTO event (
+        id,
+        identity_id,
+        event_type,
+        payload,
+        instructor_id,
+        car_id,
+        lesson_range
+      )
+      VALUES (
+        $1,
+        $1,
+        'lesson_scheduled',
+        $2,
+        $3,
+        $4,
+        tstzrange($5::timestamptz, $6::timestamptz)
+      )
+      `,
+      [
+        newLessonId,
+        {
+          student_id: studentId,
+          instructor_id: instructorId,
+          car_id: carId,
+          start_time,
+          end_time
+        },
+        instructorId,
+        carId,
+        start_time,
+        end_time
+      ]
+    );
+
+    await client.query("COMMIT");
+
+    res.json({
+      message: "Lesson rescheduled successfully",
+      old_lesson_id: lesson_id,
+      new_lesson_id: newLessonId
+    });
+
+  } catch (err) {
+    await client.query("ROLLBACK");
+    res.status(400).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+}
+
+
+export {
+  scheduleLesson,
+  cancelLesson,
+  completeLesson,
+  rescheduleLesson
+};
