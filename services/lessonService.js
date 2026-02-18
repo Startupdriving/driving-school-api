@@ -125,6 +125,31 @@ export async function scheduleLesson(req, res) {
       throw new Error("Car not available during requested time");
     }
 
+    // 6️⃣ Instructor daily capacity limit (max 3 lessons per day)
+
+    const dailyCount = await client.query(
+      `
+      SELECT COUNT(*) AS total
+      FROM event e
+      WHERE e.event_type = 'lesson_scheduled'
+        AND e.instructor_id = $1
+        AND DATE(lower(e.lesson_range)) = DATE($2::timestamptz)
+        AND NOT EXISTS (
+          SELECT 1 FROM event c
+          WHERE c.identity_id = e.identity_id
+            AND c.event_type = 'lesson_cancelled'
+        )
+      `,
+      [instructorId, startTime]
+    );
+
+    const lessonCount = parseInt(dailyCount.rows[0].total, 10);
+
+    if (lessonCount >= 3) {
+      throw new Error("Instructor daily lesson limit reached");
+    }
+
+
     // 6️⃣ Instructor overlap (using indexed columns)
     const instructorConflict = await client.query(
       `
@@ -356,6 +381,31 @@ export async function rescheduleLesson(req, res) {
       `,
       [newLessonId]
     );
+
+    // Instructor daily capacity limit (max 3 per day)
+
+    const dailyCount = await client.query(
+      `
+      SELECT COUNT(*) AS total
+      FROM event e
+      WHERE e.event_type = 'lesson_scheduled'
+        AND e.instructor_id = $1
+        AND DATE(lower(e.lesson_range)) = DATE($2::timestamptz)
+        AND NOT EXISTS (
+          SELECT 1 FROM event c
+          WHERE c.identity_id = e.identity_id
+            AND c.event_type = 'lesson_cancelled'
+        )
+      `,
+      [instructorId, start_time]
+    );
+
+    const lessonCount = parseInt(dailyCount.rows[0].total, 10);
+
+    if (lessonCount >= 3) {
+      throw new Error("Instructor daily lesson limit reached");
+    }
+
 
     // 5️⃣ Overlap validation (skip old lesson because already cancelled)
 
