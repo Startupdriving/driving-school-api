@@ -136,7 +136,7 @@ export async function scheduleLesson(req, res) {
         AND NOT EXISTS (
           SELECT 1 FROM event c
           WHERE c.identity_id = e.identity_id
-            AND c.event_type = 'lesson_canceled'
+            AND c.event_type = 'lesson_cancelled'
         )
       `,
       [instructorId, startTime, endTime]
@@ -157,7 +157,7 @@ export async function scheduleLesson(req, res) {
         AND NOT EXISTS (
           SELECT 1 FROM event c
           WHERE c.identity_id = e.identity_id
-            AND c.event_type = 'lesson_canceled'
+            AND c.event_type = 'lesson_cancelled'
         )
       `,
       [carId, startTime, endTime]
@@ -246,7 +246,7 @@ export async function cancelLesson(req, res) {
 
     await client.query(
       `INSERT INTO event (id, identity_id, event_type, payload)
-       VALUES ($1, $2, 'lesson_canceled', '{}'::jsonb)`,
+       VALUES ($1, $2, 'lesson_cancelled', '{}'::jsonb)`,
       [crypto.randomUUID(), lesson_id]
     );
 
