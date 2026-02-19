@@ -270,12 +270,6 @@ if (insertKey.rowCount === 0) {
   lesson_id: lessonId
 };
 
-
-const responseBody = {
-  message: "Lesson scheduled successfully",
-  lesson_id: lessonId
-};
-
 // Update stored idempotency response
 await client.query(
   `
