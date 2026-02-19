@@ -58,19 +58,34 @@ if (!idempotencyKey) {
 }
 
 
+
   try {
     await client.query("BEGIN");
 
-// Check if key already exists
-const existing = await client.query(
-  `SELECT response FROM idempotency_key WHERE key = $1`,
+await client.query("BEGIN");
+
+// Attempt to insert idempotency key placeholder
+const insertKey = await client.query(
+  `
+  INSERT INTO idempotency_key (key, response)
+  VALUES ($1, '{}'::jsonb)
+  ON CONFLICT (key) DO NOTHING
+  RETURNING key
+  `,
   [idempotencyKey]
 );
 
-if (existing.rowCount > 0) {
+if (insertKey.rowCount === 0) {
+  // Key already exists → fetch stored response
+  const existing = await client.query(
+    `SELECT response FROM idempotency_key WHERE key = $1`,
+    [idempotencyKey]
+  );
+
   await client.query("ROLLBACK");
   return res.json(existing.rows[0].response);
 }
+
 
 
     // 1️⃣ Validate active student
@@ -255,16 +270,25 @@ if (existing.rowCount > 0) {
   lesson_id: lessonId
 };
 
+
+const responseBody = {
+  message: "Lesson scheduled successfully",
+  lesson_id: lessonId
+};
+
+// Update stored idempotency response
 await client.query(
-  `INSERT INTO idempotency_key (key, response)
-   VALUES ($1, $2)`,
+  `
+  UPDATE idempotency_key
+  SET response = $2
+  WHERE key = $1
+  `,
   [idempotencyKey, responseBody]
 );
 
 await client.query("COMMIT");
 
 res.status(201).json(responseBody);
-
 
 
   } catch (err) {
