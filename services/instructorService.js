@@ -158,3 +158,45 @@ export async function setInstructorAvailability(req, res) {
     client.release();
   }
 }
+
+
+export async function getInstructorDailySchedule(req, res) {
+  const { id } = req.params;
+  const { date } = req.query;
+
+  if (!id || !date) {
+    return res.status(400).json({ error: "Instructor id and date are required" });
+  }
+
+  const client = await pool.connect();
+
+  try {
+    const result = await client.query(
+      `
+      SELECT
+        lesson_id,
+        student_id,
+        car_id,
+        start_time,
+        end_time
+      FROM instructor_daily_schedule
+      WHERE instructor_id = $1
+        AND lesson_date = $2
+      ORDER BY start_time ASC
+      `,
+      [id, date]
+    );
+
+    res.json({
+      instructor_id: id,
+      date,
+      total_lessons: result.rowCount,
+      lessons: result.rows
+    });
+
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+}
