@@ -51,8 +51,27 @@ export async function scheduleLesson(req, res) {
 
   const client = await pool.connect();
 
+  const idempotencyKey = req.headers["idempotency-key"];
+
+if (!idempotencyKey) {
+  return res.status(400).json({ error: "Idempotency-Key header required" });
+}
+
+
   try {
     await client.query("BEGIN");
+
+// Check if key already exists
+const existing = await client.query(
+  `SELECT response FROM idempotency_key WHERE key = $1`,
+  [idempotencyKey]
+);
+
+if (existing.rowCount > 0) {
+  await client.query("ROLLBACK");
+  return res.json(existing.rows[0].response);
+}
+
 
     // 1️⃣ Validate active student
     const studentCheck = await client.query(
@@ -231,12 +250,22 @@ export async function scheduleLesson(req, res) {
       ]
     );
 
-    await client.query("COMMIT");
+    const responseBody = {
+  message: "Lesson scheduled successfully",
+  lesson_id: lessonId
+};
 
-    res.status(201).json({
-      message: "Lesson scheduled successfully",
-      lesson_id: lessonId
-    });
+await client.query(
+  `INSERT INTO idempotency_key (key, response)
+   VALUES ($1, $2)`,
+  [idempotencyKey, responseBody]
+);
+
+await client.query("COMMIT");
+
+res.status(201).json(responseBody);
+
+
 
   } catch (err) {
     await client.query("ROLLBACK");
