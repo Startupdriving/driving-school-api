@@ -214,16 +214,6 @@ export async function getInstructorDailySchedule(req, res) {
 }
 
 
-async function insertInstructorStateEvent(client, instructorId, eventType) {
-  await client.query(
-    `
-    INSERT INTO event (id, identity_id, event_type, payload)
-    VALUES ($1, $2, $3, '{}'::jsonb)
-    `,
-    [crypto.randomUUID(), instructorId, eventType]
-  );
-}
-
 export async function goOnline(req, res) {
   try {
     const response = await withIdempotency(req, async (client) => {
