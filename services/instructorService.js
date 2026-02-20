@@ -213,9 +213,6 @@ export async function getInstructorDailySchedule(req, res) {
   }
 }
 
-import { withIdempotency } from "./idempotencyService.js";
-import pool from "../db.js";
-import crypto from "crypto";
 
 async function insertInstructorStateEvent(client, instructorId, eventType) {
   await client.query(
