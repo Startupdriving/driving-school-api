@@ -12,86 +12,87 @@ function isValidUUID(id) {
   return uuidRegex.test(id);
 }
 
-
-
 export async function scheduleLesson(req, res) {
-  const {
-    student_id,
-    instructor_id,
-    car_id,
-    start_time,
-    end_time
-  } = req.body;
-
-  if (!student_id || !instructor_id || !car_id || !start_time || !end_time) {
-    return res.status(400).json({ error: "All fields required" });
-  }
-
-  if (
-    !isValidUUID(student_id) ||
-    !isValidUUID(instructor_id) ||
-    !isValidUUID(car_id)
-  ) {
-    return res.status(400).json({ error: "Invalid UUID format" });
-  }
-
-  const idempotencyKey = req.headers["idempotency-key"];
-  if (!idempotencyKey) {
-    return res.status(400).json({ error: "Idempotency-Key header required" });
-  }
-
-  const client = await pool.connect();
-
   try {
-    await client.query("BEGIN");
+    const response = await withIdempotency(req, async (client) => {
 
-    const result = await withIdempotency(
-      client,
-      idempotencyKey,
-      async () => {
+      const {
+        student_id,
+        instructor_id,
+        car_id,
+        start_time,
+        end_time
+      } = req.body;
 
-        const studentId = student_id;
-        const instructorId = instructor_id;
-        const carId = car_id;
-        const startTime = start_time;
-        const endTime = end_time;
+      if (!student_id || !instructor_id || !car_id || !start_time || !end_time) {
+        throw new Error("All fields required");
+      }
 
-        const payload = {
-          student_id: studentId,
-          instructor_id: instructorId,
-          car_id: carId,
-          start_time: startTime,
-          end_time: endTime
-        };
+      if (
+        !isValidUUID(student_id) ||
+        !isValidUUID(instructor_id) ||
+        !isValidUUID(car_id)
+      ) {
+        throw new Error("Invalid UUID format");
+      }
 
-        const lessonId = generateUUID();
+      const studentId = student_id;
+      const instructorId = instructor_id;
+      const carId = car_id;
+      const startTime = start_time;
+      const endTime = end_time;
 
-        // 1️⃣ Validate active student
-        const studentCheck = await client.query(
-          `SELECT 1 FROM current_active_students WHERE id = $1`,
-          [studentId]
-        );
-        if (studentCheck.rowCount === 0) {
-          throw new Error("Student not active");
-        }
+      const payload = {
+        student_id: studentId,
+        instructor_id: instructorId,
+        car_id: carId,
+        start_time: startTime,
+        end_time: endTime
+      };
 
-        // 2️⃣ Validate active instructor
-        const instructorCheck = await client.query(
-          `SELECT 1 FROM current_active_instructors WHERE id = $1`,
-          [instructorId]
-        );
-        if (instructorCheck.rowCount === 0) {
-          throw new Error("Instructor not active");
-        }
+      const lessonId = generateUUID();
 
-        // 3️⃣ Validate active car
-        const carCheck = await client.query(
-          `SELECT 1 FROM current_active_cars WHERE id = $1`,
-          [carId]
-        );
-        if (carCheck.rowCount === 0) {
-          throw new Error("Car not active");
-        }
+      // 1️⃣ Validate active student
+      const studentCheck = await client.query(
+        `SELECT 1 FROM current_active_students WHERE id = $1`,
+        [studentId]
+      );
+      if (studentCheck.rowCount === 0) {
+        throw new Error("Student not active");
+      }
+
+      // 2️⃣ Validate active instructor
+      const instructorCheck = await client.query(
+        `SELECT 1 FROM current_active_instructors WHERE id = $1`,
+        [instructorId]
+      );
+      if (instructorCheck.rowCount === 0) {
+        throw new Error("Instructor not active");
+      }
+
+      // 3️⃣ Validate instructor online
+      const stateCheck = await client.query(
+        `SELECT state FROM current_instructor_state WHERE instructor_id = $1`,
+        [instructorId]
+      );
+
+      if (
+        stateCheck.rowCount === 0 ||
+        stateCheck.rows[0].state !== "instructor_online"
+      ) {
+        throw new Error("Instructor is not online");
+      }
+
+      // 4️⃣ Validate active car
+      const carCheck = await client.query(
+        `SELECT 1 FROM current_active_cars WHERE id = $1`,
+        [carId]
+      );
+      if (carCheck.rowCount === 0) {
+        throw new Error("Car not active");
+      }
+
+
 
         // 4️⃣ Instructor availability
         const instructorAvailability = await client.query(
@@ -204,68 +205,57 @@ export async function scheduleLesson(req, res) {
           throw new Error("Car already booked for this time");
         }
 
-        // 9️⃣ Create identity
-        await client.query(
-          `INSERT INTO identity (id, identity_type)
-           VALUES ($1, 'lesson')`,
-          [lessonId]
-        );
+        // Insert identity
+      await client.query(
+        `INSERT INTO identity (id, identity_type) VALUES ($1, 'lesson')`,
+        [lessonId]
+      );
 
-        // 🔟 Insert event
-        await client.query(
-          `
-          INSERT INTO event (
-            id,
-            identity_id,
-            event_type,
-            payload,
-            instructor_id,
-            car_id,
-            lesson_range
-          )
-          VALUES (
-            $1,
-            $1,
-            'lesson_scheduled',
-            $2,
-            $3,
-            $4,
-            tstzrange($5::timestamptz, $6::timestamptz)
-          )
-          `,
-          [
-            lessonId,
-            payload,
-            instructorId,
-            carId,
-            startTime,
-            endTime
-          ]
-        );
+      // Insert event
+      await client.query(
+        `
+        INSERT INTO event (
+          id,
+          identity_id,
+          event_type,
+          payload,
+          instructor_id,
+          car_id,
+          lesson_range
+        )
+        VALUES (
+          $1,
+          $1,
+          'lesson_scheduled',
+          $2,
+          $3,
+          $4,
+          tstzrange($5::timestamptz, $6::timestamptz)
+        )
+        `,
+        [
+          lessonId,
+          payload,
+          instructorId,
+          carId,
+          startTime,
+          endTime
+        ]
+      );
 
-        return {
-          message: "Lesson scheduled successfully",
-          lesson_id: lessonId
-        };
-      }
-    );
+      return {
+        message: "Lesson scheduled successfully",
+        lesson_id: lessonId
+      };
+    });
 
-    if (result.alreadyProcessed) {
-      await client.query("ROLLBACK");
-      return res.json(result.response);
-    }
-
-    await client.query("COMMIT");
-
-    res.status(201).json(result.response);
+    res.json(response);
 
   } catch (err) {
-    await client.query("ROLLBACK");
     res.status(400).json({ error: err.message });
-  } finally {
-    client.release();
   }
 }
+         
 
 
 export async function cancelLesson(req, res) {
