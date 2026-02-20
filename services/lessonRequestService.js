@@ -182,8 +182,7 @@ export async function sendOffer(req, res) {
 
   } catch (err) {
     res.status(400).json({ error: err.message });
-  }
-}
+
 
 export async function acceptOffer(req, res) {
   try {
