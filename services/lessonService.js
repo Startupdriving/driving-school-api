@@ -70,18 +70,24 @@ export async function scheduleLesson(req, res) {
         throw new Error("Instructor not active");
       }
 
-      // 3️⃣ Validate instructor online
-      const stateCheck = await client.query(
-        `SELECT state FROM current_instructor_state WHERE instructor_id = $1`,
-        [instructorId]
-      );
+      
+      // 3️⃣ Validate instructor runtime availability
+const runtimeCheck = await client.query(
+  `
+  SELECT runtime_state
+  FROM current_instructor_runtime_state
+  WHERE instructor_id = $1
+  `,
+  [instructorId]
+);
 
-      if (
-        stateCheck.rowCount === 0 ||
-        stateCheck.rows[0].state !== "instructor_online"
-      ) {
-        throw new Error("Instructor is not online");
-      }
+if (
+  runtimeCheck.rowCount === 0 ||
+  runtimeCheck.rows[0].runtime_state !== "instructor_online"
+) {
+  throw new Error("Instructor is not available right now");
+}
+
 
       // 4️⃣ Validate active car
       const carCheck = await client.query(
