@@ -28,20 +28,18 @@ export async function withIdempotency(client, key, handler) {
   }
 
   // Execute actual business logic
-  const responseBody = await handler();
+  const responseBody = await handler(client);
 
-  // Store final response
-  await client.query(
-    `
-    UPDATE idempotency_key
-    SET response = $2
-    WHERE key = $1
-    `,
-    [key, responseBody]
-  );
+await client.query(
+  `
+  UPDATE idempotency_key
+  SET response = $2
+  WHERE key = $1
+  `,
+  [key, responseBody]
+);
 
-  return {
-    alreadyProcessed: false,
-    response: responseBody
-  };
-}
+await client.query("COMMIT");
+
+return responseBody;
+
