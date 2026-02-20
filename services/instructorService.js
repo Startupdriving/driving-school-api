@@ -1,5 +1,17 @@
+import { withIdempotency } from "./idempotencyService.js";
 import pool from "../db.js";
 import crypto from "crypto";
+
+async function insertInstructorStateEvent(client, instructorId, eventType) {
+  await client.query(
+    `
+    INSERT INTO event (id, identity_id, event_type, payload)
+    VALUES ($1, $2, $3, '{}'::jsonb)
+    `,
+    [crypto.randomUUID(), instructorId, eventType]
+  );
+}
+
 
 function generateUUID() {
   return crypto.randomUUID();
@@ -198,5 +210,116 @@ export async function getInstructorDailySchedule(req, res) {
     res.status(400).json({ error: err.message });
   } finally {
     client.release();
+  }
+}
+
+import { withIdempotency } from "./idempotencyService.js";
+import pool from "../db.js";
+import crypto from "crypto";
+
+async function insertInstructorStateEvent(client, instructorId, eventType) {
+  await client.query(
+    `
+    INSERT INTO event (id, identity_id, event_type, payload)
+    VALUES ($1, $2, $3, '{}'::jsonb)
+    `,
+    [crypto.randomUUID(), instructorId, eventType]
+  );
+}
+
+export async function goOnline(req, res) {
+  try {
+    const response = await withIdempotency(req, async (client) => {
+
+      const { instructor_id } = req.body;
+
+      if (!instructor_id) {
+        throw new Error("instructor_id required");
+      }
+
+      const exists = await client.query(
+        `SELECT 1 FROM identity WHERE id = $1 AND identity_type = 'instructor'`,
+        [instructor_id]
+      );
+
+      if (exists.rowCount === 0) {
+        throw new Error("Instructor not found");
+      }
+
+      await insertInstructorStateEvent(client, instructor_id, "instructor_online");
+
+      return { message: "Instructor is now online" };
+    });
+
+    res.json(response);
+
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+}
+
+export async function goOffline(req, res) {
+  try {
+    const response = await withIdempotency(req, async (client) => {
+
+      const { instructor_id } = req.body;
+
+      if (!instructor_id) {
+        throw new Error("instructor_id required");
+      }
+
+      await insertInstructorStateEvent(client, instructor_id, "instructor_offline");
+
+      return { message: "Instructor is now offline" };
+    });
+
+    res.json(response);
+
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+}
+
+export async function pauseInstructor(req, res) {
+  try {
+    const response = await withIdempotency(req, async (client) => {
+
+      const { instructor_id } = req.body;
+
+      if (!instructor_id) {
+        throw new Error("instructor_id required");
+      }
+
+      await insertInstructorStateEvent(client, instructor_id, "instructor_paused");
+
+      return { message: "Instructor paused" };
+    });
+
+    res.json(response);
+
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+}
+
+export async function resumeInstructor(req, res) {
+  try {
+    const response = await withIdempotency(req, async (client) => {
+
+      const { instructor_id } = req.body;
+
+      if (!instructor_id) {
+        throw new Error("instructor_id required");
+      }
+
+      await insertInstructorStateEvent(client, instructor_id, "instructor_resumed");
+
+      return { message: "Instructor resumed" };
+    });
+
+    res.json(response);
+
+  } catch (err) {
+    res.status(400).json({ error: err.message });
   }
 }
