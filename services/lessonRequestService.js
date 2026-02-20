@@ -156,19 +156,37 @@ export async function acceptOffer(req, res) {
       }
 
       // 1️⃣ Verify request exists and not already confirmed
-      const confirmedCheck = await client.query(
-        `
-        SELECT 1
-        FROM event
-        WHERE identity_id = $1
-        AND event_type = 'lesson_confirmed'
-        `,
-        [lesson_request_id]
-      );
+      // 1️⃣ Lock lesson_request row (prevents race conditions)
+const lockRequest = await client.query(
+  `
+  SELECT id
+  FROM identity
+  WHERE id = $1
+  AND identity_type = 'lesson_request'
+  FOR UPDATE
+  `,
+  [lesson_request_id]
+);
 
-      if (confirmedCheck.rowCount > 0) {
-        throw new Error("Lesson request already confirmed");
-      }
+if (lockRequest.rowCount === 0) {
+  throw new Error("Lesson request not found");
+}
+
+// 2️⃣ Check if already confirmed
+const confirmedCheck = await client.query(
+  `
+  SELECT 1
+  FROM event
+  WHERE identity_id = $1
+  AND event_type = 'lesson_confirmed'
+  `,
+  [lesson_request_id]
+);
+
+if (confirmedCheck.rowCount > 0) {
+  throw new Error("Lesson request already confirmed");
+}
+
 
       // 2️⃣ Verify offer was sent to this instructor
       const offerCheck = await client.query(
