@@ -1,3 +1,4 @@
+import matchingRoutes from "./routes/matching.js";
 import lessonRequestRoutes from "./routes/lessonRequest.js";
 import lessonRoutes from "./routes/lesson.js";
 import carRoutes from "./routes/car.js";
@@ -20,6 +21,7 @@ app.get("/", (req, res) => {
 
 // Read routes
 app.use("/read", readRoutes);
+app.use("/read/matching", matchingRoutes);
 
 // Write routes
 app.use("/write", writeRoutes);
