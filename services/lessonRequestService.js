@@ -92,6 +92,46 @@ export async function requestLesson(req, res) {
   }
 }
 
+// 3️⃣ Auto-match eligible instructors (top 3)
+
+const eligible = await client.query(
+  `
+  SELECT i.id
+  FROM identity i
+  JOIN current_online_instructors o
+    ON i.id = o.instructor_id
+  WHERE i.identity_type = 'instructor'
+  AND NOT EXISTS (
+    SELECT 1 FROM event e
+    WHERE e.instructor_id = i.id
+    AND e.event_type = 'lesson_scheduled'
+    AND e.lesson_range && tstzrange($1::timestamptz, $2::timestamptz)
+    AND NOT EXISTS (
+      SELECT 1 FROM event c
+      WHERE c.identity_id = e.identity_id
+      AND c.event_type = 'lesson_cancelled'
+    )
+  )
+  LIMIT 3
+  `,
+  [requested_start_time, requested_end_time]
+);
+
+// Insert lesson_offer_sent events
+for (const row of eligible.rows) {
+  await client.query(
+    `
+    INSERT INTO event (id, identity_id, event_type, payload)
+    VALUES ($1, $2, 'lesson_offer_sent', $3)
+    `,
+    [
+      crypto.randomUUID(),
+      requestId,
+      { instructor_id: row.id }
+    ]
+  );
+}
+
 
 export async function sendOffer(req, res) {
   try {
