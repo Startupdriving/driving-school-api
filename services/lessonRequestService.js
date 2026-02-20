@@ -91,3 +91,57 @@ export async function requestLesson(req, res) {
     res.status(400).json({ error: err.message });
   }
 }
+
+
+export async function sendOffer(req, res) {
+  try {
+    const response = await withIdempotency(req, async (client) => {
+
+      const { lesson_request_id, instructor_id } = req.body;
+
+      if (!lesson_request_id || !instructor_id) {
+        throw new Error("lesson_request_id and instructor_id required");
+      }
+
+      // 1️⃣ Verify lesson_request exists
+      const requestCheck = await client.query(
+        `
+        SELECT 1
+        FROM identity
+        WHERE id = $1
+        AND identity_type = 'lesson_request'
+        `,
+        [lesson_request_id]
+      );
+
+      if (requestCheck.rowCount === 0) {
+        throw new Error("Lesson request not found");
+      }
+
+      // 2️⃣ Insert lesson_offer_sent event
+      await client.query(
+        `
+        INSERT INTO event (id, identity_id, event_type, payload)
+        VALUES ($1, $2, 'lesson_offer_sent', $3)
+        `,
+        [
+          crypto.randomUUID(),
+          lesson_request_id,
+          { instructor_id }
+        ]
+      );
+
+      return {
+        message: "Offer sent",
+        lesson_request_id,
+        instructor_id
+      };
+    });
+
+    res.json(response);
+
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+}
+
