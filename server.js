@@ -1,3 +1,4 @@
+import lessonRequestRoutes from "./routes/lessonRequest.js";
 import lessonRoutes from "./routes/lesson.js";
 import carRoutes from "./routes/car.js";
 import instructorRoutes from "./routes/instructor.js";
@@ -25,7 +26,7 @@ app.use("/write", writeRoutes);
 app.use("/write/instructor", instructorRoutes);
 app.use("/write/car", carRoutes);
 app.use("/write/lesson", lessonRoutes);
-
+app.use("/write/lesson-request", lessonRequestRoutes);
 const PORT = process.env.PORT || 5173;
 
 runMigrations().then(() => {
