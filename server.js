@@ -1,3 +1,4 @@
+import { startDispatchWorker } from "./services/dispatchWorker.js";
 import matchingRoutes from "./routes/matching.js";
 import lessonRequestRoutes from "./routes/lessonRequest.js";
 import lessonRoutes from "./routes/lesson.js";
@@ -34,6 +35,8 @@ const PORT = process.env.PORT || 5173;
 runMigrations().then(() => {
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`API running on port ${PORT}`);
+// Start background dispatch worker
+  startDispatchWorker();
   });
 });
 
