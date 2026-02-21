@@ -28,7 +28,11 @@ export async function runMigrations() {
 
     const migrationFiles = files
       .filter(file => file.endsWith(".sql"))
-      .sort();
+      .sort((a, b) => {
+  const vA = parseInt(a.split("_")[0]);
+  const vB = parseInt(b.split("_")[0]);
+  return vA - vB;
+});
 
     for (const file of migrationFiles) {
       const version = parseInt(file.split("_")[0]);
@@ -42,8 +46,15 @@ export async function runMigrations() {
         );
 
         await client.query("BEGIN");
+
         await client.query(sql);
-        await client.query("COMMIT");
+
+       await client.query(
+      "INSERT INTO schema_version (version) VALUES ($1)",
+      [version]
+      );
+
+      await client.query("COMMIT");
 
         console.log(`✅ Migration ${file} applied`);
       }
@@ -59,3 +70,5 @@ export async function runMigrations() {
     client.release();
   }
 }
+
+runMigrations();

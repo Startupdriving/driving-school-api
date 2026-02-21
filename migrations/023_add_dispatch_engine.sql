@@ -10,7 +10,8 @@
 INSERT INTO identity_event_rule (identity_type, event_type) VALUES
 ('lesson_request', 'lesson_request_dispatch_started'),
 ('lesson_request', 'lesson_request_wave_completed'),
-('lesson_request', 'lesson_request_expired');
+('lesson_request', 'lesson_request_expired')
+ON CONFLICT (identity_type, event_type) DO NOTHING;
 
 
 -- ============================================
