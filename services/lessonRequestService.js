@@ -187,7 +187,7 @@ await client.query(
 }
 
 
-/* =====================================================
+/* c=====================================================
    ACCEPT OFFER (RACE-SAFE, ATOMIC)
 ===================================================== */
 export async function acceptOffer(req, res) {
@@ -221,7 +221,7 @@ export async function acceptOffer(req, res) {
 // ============================
 
 // 1️⃣ Reject if request already expired
-const expiredCheck = await client.query(
+const alreadyExpiredCheck = await client.query(
   `
   SELECT 1
   FROM event
@@ -232,13 +232,13 @@ const expiredCheck = await client.query(
   [requestId]
 );
 
-if (expiredCheck.rowCount > 0) {
+if (alreadyExpiredCheck.rowCount > 0) {
   throw new Error("Request already expired");
 }
 
 
 // 2️⃣ Reject if already confirmed
-const confirmedCheck = await client.query(
+const alreadyConfirmedCheck = await client.query(
   `
   SELECT 1
   FROM event
@@ -249,7 +249,7 @@ const confirmedCheck = await client.query(
   [requestId]
 );
 
-if (confirmedCheck.rowCount > 0) {
+if (alreadyConfirmedCheck.rowCount > 0) {
   throw new Error("Request already confirmed");
 }
 
