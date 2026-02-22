@@ -3,7 +3,7 @@ import { v4 as uuidv4 } from "uuid";
 
 const WAVE_SIZE = 3;
 const MAX_WAVES = 3;
-const WAVE_TIMEOUT_SECONDS = 120;
+const WAVE_TIMEOUT_SECONDS = 300;
 
 export function startDispatchWorker() {
   console.log("🚀 Dispatch worker started");
