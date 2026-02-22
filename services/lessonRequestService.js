@@ -200,7 +200,11 @@ export async function acceptOffer(req, res) {
         throw new Error("lesson_request_id, instructor_id, car_id required");
       }
 
-      // 🔒 Lock lesson_request row
+      const requestId = lesson_request_id;
+      const instructorId = instructor_id;
+      const carId = car_id;
+
+      // 🔒 Lock lesson_request
       const lockRequest = await client.query(
         `
         SELECT id
@@ -209,147 +213,112 @@ export async function acceptOffer(req, res) {
         AND identity_type = 'lesson_request'
         FOR UPDATE
         `,
-        [lesson_request_id]
+        [requestId]
       );
 
       if (lockRequest.rowCount === 0) {
         throw new Error("Lesson request not found");
       }
 
-// ============================
-// VALIDATION SECTION
-// ============================
+      // ============================
+      // VALIDATION SECTION
+      // ============================
 
-// 1️⃣ Reject if request already expired
-const alreadyExpiredCheck = await client.query(
-  `
-  SELECT 1
-  FROM event
-  WHERE identity_id = $1
-  AND event_type = 'lesson_request_expired'
-  LIMIT 1
-  `,
-  [requestId]
-);
+      // Reject if expired
+      const expiredCheck = await client.query(
+        `
+        SELECT 1
+        FROM event
+        WHERE identity_id = $1
+        AND event_type = 'lesson_request_expired'
+        LIMIT 1
+        `,
+        [requestId]
+      );
 
-if (alreadyExpiredCheck.rowCount > 0) {
-  throw new Error("Request already expired");
-}
+      if (expiredCheck.rowCount > 0) {
+        throw new Error("Request already expired");
+      }
 
-
-// 2️⃣ Reject if already confirmed
-const alreadyConfirmedCheck = await client.query(
-  `
-  SELECT 1
-  FROM event
-  WHERE identity_id = $1
-  AND event_type = 'lesson_confirmed'
-  LIMIT 1
-  `,
-  [requestId]
-);
-
-if (alreadyConfirmedCheck.rowCount > 0) {
-  throw new Error("Request already confirmed");
-}
-
-
-// 3️⃣ Get current active wave
-const currentWaveResult = await client.query(
-  `
-  SELECT (payload->>'wave')::int AS wave
-  FROM event
-  WHERE identity_id = $1
-  AND event_type = 'lesson_request_dispatch_started'
-  ORDER BY created_at DESC
-  LIMIT 1
-  `,
-  [requestId]
-);
-
-if (currentWaveResult.rowCount === 0) {
-  throw new Error("No active dispatch wave");
-}
-
-const currentWave = currentWaveResult.rows[0].wave;
-
-
-// 4️⃣ Verify instructor has offer in current wave
-const offerResult = await client.query(
-  `
-  SELECT (payload->>'wave')::int AS wave
-  FROM event
-  WHERE identity_id = $1
-  AND event_type = 'lesson_offer_sent'
-  AND instructor_id = $2
-  ORDER BY created_at DESC
-  LIMIT 1
-  `,
-  [requestId, instructorId]
-);
-
-if (offerResult.rowCount === 0) {
-  throw new Error("No offer found for instructor");
-}
-
-const offerWave = offerResult.rows[0].wave;
-
-if (offerWave !== currentWave) {
-  throw new Error("Offer belongs to inactive wave");
-}
-
-
-// 5️⃣ Ensure wave not already completed
-const waveCompletedCheck = await client.query(
-  `
-  SELECT 1
-  FROM event
-  WHERE identity_id = $1
-  AND event_type = 'lesson_request_wave_completed'
-  AND (payload->>'wave')::int = $2
-  LIMIT 1
-  `,
-  [requestId, currentWave]
-);
-
-if (waveCompletedCheck.rowCount > 0) {
-  throw new Error("Wave already completed");
-}
-
-// ============================
-// END VALIDATION SECTION
-// ============================
-
-      // Check already confirmed
+      // Reject if already confirmed
       const confirmedCheck = await client.query(
         `
         SELECT 1
         FROM event
         WHERE identity_id = $1
         AND event_type = 'lesson_confirmed'
+        LIMIT 1
         `,
-        [lesson_request_id]
+        [requestId]
       );
 
       if (confirmedCheck.rowCount > 0) {
-        throw new Error("Lesson request already confirmed");
+        throw new Error("Request already confirmed");
       }
 
-      // Verify offer exists
-      const offerCheck = await client.query(
+      // Get current wave
+      const currentWaveResult = await client.query(
+        `
+        SELECT (payload->>'wave')::int AS wave
+        FROM event
+        WHERE identity_id = $1
+        AND event_type = 'lesson_request_dispatch_started'
+        ORDER BY created_at DESC
+        LIMIT 1
+        `,
+        [requestId]
+      );
+
+      if (currentWaveResult.rowCount === 0) {
+        throw new Error("No active dispatch wave");
+      }
+
+      const currentWave = currentWaveResult.rows[0].wave;
+
+      // Verify instructor was offered in current wave
+      const offerResult = await client.query(
+        `
+        SELECT (payload->>'wave')::int AS wave
+        FROM event
+        WHERE identity_id = $1
+        AND event_type = 'lesson_offer_sent'
+        AND instructor_id = $2
+        ORDER BY created_at DESC
+        LIMIT 1
+        `,
+        [requestId, instructorId]
+      );
+
+      if (offerResult.rowCount === 0) {
+        throw new Error("No offer found for instructor");
+      }
+
+      const offerWave = offerResult.rows[0].wave;
+
+      if (offerWave !== currentWave) {
+        throw new Error("Offer belongs to inactive wave");
+      }
+
+      // Ensure wave not completed
+      const waveCompletedCheck = await client.query(
         `
         SELECT 1
         FROM event
         WHERE identity_id = $1
-        AND event_type = 'lesson_offer_sent'
-        AND payload->>'instructor_id' = $2
+        AND event_type = 'lesson_request_wave_completed'
+        AND (payload->>'wave')::int = $2
+        LIMIT 1
         `,
-        [lesson_request_id, instructor_id]
+        [requestId, currentWave]
       );
 
-      if (offerCheck.rowCount === 0) {
-        throw new Error("No offer found for this instructor");
+      if (waveCompletedCheck.rowCount > 0) {
+        throw new Error("Wave already completed");
       }
+
+      // ============================
+      // END VALIDATION
+      // ============================
 
       // Get request details
       const requestInfo = await client.query(
@@ -361,34 +330,52 @@ if (waveCompletedCheck.rowCount > 0) {
         WHERE identity_id = $1
         AND event_type = 'lesson_requested'
         `,
-        [lesson_request_id]
+        [requestId]
       );
+
+      if (requestInfo.rowCount === 0) {
+        throw new Error("Request details not found");
+      }
 
       const { start_time, end_time, student_id } = requestInfo.rows[0];
 
-      // Insert acceptance event
+      // Insert lesson_offer_accepted
       await client.query(
         `
-        INSERT INTO event (id, identity_id, event_type, payload)
-        VALUES ($1, $2, 'lesson_offer_accepted', $3)
+        INSERT INTO event (
+          id,
+          identity_id,
+          event_type,
+          instructor_id,
+          payload
+        )
+        VALUES ($1, $2, 'lesson_offer_accepted', $3, $4)
         `,
         [
           generateUUID(),
-          lesson_request_id,
-          { instructor_id }
+          requestId,
+          instructorId,
+          JSON.stringify({ wave: currentWave })
         ]
       );
 
-      // Insert confirmation event
+      // Insert lesson_confirmed
       await client.query(
         `
-        INSERT INTO event (id, identity_id, event_type, payload)
-        VALUES ($1, $2, 'lesson_confirmed', $3)
+        INSERT INTO event (
+          id,
+          identity_id,
+          event_type,
+          instructor_id,
+          payload
+        )
+        VALUES ($1, $2, 'lesson_confirmed', $3, $4)
         `,
         [
           generateUUID(),
-          lesson_request_id,
-          { instructor_id }
+          requestId,
+          instructorId,
+          JSON.stringify({ wave: currentWave })
         ]
       );
 
@@ -427,15 +414,15 @@ if (waveCompletedCheck.rowCount > 0) {
         `,
         [
           lessonId,
-          {
+          JSON.stringify({
             student_id,
-            instructor_id,
-            car_id,
+            instructor_id: instructorId,
+            car_id: carId,
             start_time,
             end_time
-          },
-          instructor_id,
-          car_id,
+          }),
+          instructorId,
+          carId,
           start_time,
           end_time
         ]
@@ -454,4 +441,3 @@ if (waveCompletedCheck.rowCount > 0) {
     res.status(400).json({ error: err.message });
   }
 }
-
