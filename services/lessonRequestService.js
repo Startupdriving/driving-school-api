@@ -86,7 +86,7 @@ await client.query(
       // 2️⃣ Insert lesson_request_dispatch_started (Wave 1)
 
       const WAVE_SIZE = 3;
-      const WAVE_TIMEOUT_SECONDS = 120;
+      const WAVE_TIMEOUT_SECONDS = 20;
 
       const expiresAt = new Date(
       Date.now() + WAVE_TIMEOUT_SECONDS * 1000
