@@ -61,7 +61,7 @@ async function handleExpiredWave(client, requestId, currentWave) {
     ]
   );
 
-  // 2️⃣ Check how many waves already started
+  // 2️⃣ Count how many waves already started
   const { rows } = await client.query(
     `
     SELECT COUNT(*)::int AS wave_count
@@ -75,7 +75,7 @@ async function handleExpiredWave(client, requestId, currentWave) {
   const waveCount = rows[0].wave_count;
 
   if (waveCount >= MAX_WAVES) {
-    // 3️⃣ Expire request
+    // Expire due to max waves
     await client.query(
       `
       INSERT INTO event (id, identity_id, event_type, payload)
@@ -93,34 +93,17 @@ async function handleExpiredWave(client, requestId, currentWave) {
     return;
   }
 
-  // 4️⃣ Start next wave
+  // 3️⃣ Attempt next wave via sendNextWaveOffers
   const nextWave = currentWave + 1;
-  const expiresAt = new Date(Date.now() + WAVE_TIMEOUT_SECONDS * 1000);
 
-  await client.query(
-    `
-    INSERT INTO event (id, identity_id, event_type, payload)
-    VALUES ($1, $2, 'lesson_request_dispatch_started', $3)
-    `,
-    [
-      uuidv4(),
-      requestId,
-      JSON.stringify({
-        wave: nextWave,
-        expires_at: expiresAt,
-        wave_size: WAVE_SIZE
-      })
-    ]
-  );
-
-  // 5️⃣ Send new offers
   await sendNextWaveOffers(client, requestId, nextWave);
 }
 
 
+
 async function sendNextWaveOffers(client, requestId, wave) {
 
-  // Instructors already offered
+  // Already offered instructors
   const { rows: offeredRows } = await client.query(
     `
     SELECT instructor_id
@@ -149,7 +132,7 @@ async function sendNextWaveOffers(client, requestId, wave) {
     ]
   );
 
-  // 🔥 NEW: If no candidates → expire immediately
+  // If no candidates → expire immediately
   if (candidates.length === 0) {
 
     await client.query(
@@ -169,10 +152,34 @@ async function sendNextWaveOffers(client, requestId, wave) {
       ]
     );
 
-    return; // stop processing — do NOT create new wave
+    return;
   }
 
-  // Insert offers for next wave
+  // 🔥 Start next wave ONLY if candidates exist
+  const expiresAt = new Date(Date.now() + WAVE_TIMEOUT_SECONDS * 1000);
+
+  await client.query(
+    `
+    INSERT INTO event (
+      id,
+      identity_id,
+      event_type,
+      payload
+    )
+    VALUES ($1, $2, 'lesson_request_dispatch_started', $3)
+    `,
+    [
+      uuidv4(),
+      requestId,
+      JSON.stringify({
+        wave,
+        expires_at: expiresAt,
+        wave_size: WAVE_SIZE
+      })
+    ]
+  );
+
+  // Insert offers
   for (const instructor of candidates) {
     await client.query(
       `
