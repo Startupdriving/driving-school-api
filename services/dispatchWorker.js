@@ -20,10 +20,15 @@ async function processExpiredWaves() {
     await client.query("BEGIN");
 
     const { rows } = await client.query(`
-      SELECT request_id, current_wave
-      FROM expirable_lesson_requests
-      FOR UPDATE SKIP LOCKED
-    `);
+  SELECT r.request_id, r.current_wave
+  FROM expirable_lesson_requests r
+  JOIN identity i ON i.id = r.request_id
+  WHERE r.expires_at < NOW()
+  AND r.is_confirmed = false
+  AND r.is_expired = false
+  AND r.current_wave_completed = false
+  FOR UPDATE OF i SKIP LOCKED
+`);
 
     for (const row of rows) {
       await handleExpiredWave(client, row.request_id, row.current_wave);
