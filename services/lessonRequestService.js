@@ -1,3 +1,4 @@
+import { v4 as uuidv4 } from "uuid";
 import { withIdempotency } from "./idempotencyService.js";
 import crypto from "crypto";
 
@@ -51,35 +52,71 @@ export async function requestLesson(req, res) {
         [requestId]
       );
 
-      // Insert lesson_requested event
-      await client.query(
-        `
-        INSERT INTO event (
-          id,
-          identity_id,
-          event_type,
-          payload,
-          lesson_range
-        )
-        VALUES (
-          $1,
-          $1,
-          'lesson_requested',
-          $2,
-          tstzrange($3::timestamptz, $4::timestamptz)
-        )
-        `,
-        [
-          requestId,
-          {
-            student_id,
-            requested_start_time,
-            requested_end_time
-          },
-          requested_start_time,
-          requested_end_time
-        ]
+      // 1️⃣ Insert lesson_requested event
+await client.query(
+  `
+  INSERT INTO event (
+    id,
+    identity_id,
+    event_type,
+    payload,
+    lesson_range
+  )
+  VALUES (
+    $1,
+    $1,
+    'lesson_requested',
+    $2,
+    tstzrange($3::timestamptz, $4::timestamptz)
+  )
+  `,
+  [
+    requestId,
+    JSON.stringify({
+      student_id,
+      requested_start_time,
+      requested_end_time
+    }),
+    requested_start_time,
+    requested_end_time
+  ]
+);
+
+
+      // 2️⃣ Insert lesson_request_dispatch_started (Wave 1)
+
+      const WAVE_SIZE = 3;
+      const WAVE_TIMEOUT_SECONDS = 120;
+
+      const expiresAt = new Date(
+      Date.now() + WAVE_TIMEOUT_SECONDS * 1000
       );
+
+      await client.query(
+      `
+      INSERT INTO event (
+      id,
+      identity_id,
+      event_type,
+      payload
+      )
+      VALUES (
+      $1,
+      $2,
+      'lesson_request_dispatch_started',
+      $3
+       )
+  `,
+  [
+    uuidv4(),
+    requestId,
+    JSON.stringify({
+      wave: 1,
+      expires_at: expiresAt,
+      wave_size: WAVE_SIZE
+    })
+  ]
+);
 
       // AUTO MATCHING (Top 3 eligible instructors)
       const eligible = await client.query(
@@ -107,16 +144,31 @@ export async function requestLesson(req, res) {
 
       for (const row of eligible.rows) {
         await client.query(
-          `
-          INSERT INTO event (id, identity_id, event_type, payload)
-          VALUES ($1, $2, 'lesson_offer_sent', $3)
-          `,
-          [
-            generateUUID(),
-            requestId,
-            { instructor_id: row.id }
-          ]
-        );
+  `
+  INSERT INTO event (
+    id,
+    identity_id,
+    event_type,
+    instructor_id,
+    payload
+  )
+  VALUES (
+    $1,
+    $2,
+    'lesson_offer_sent',
+    $3,
+    $4
+  )
+  `,
+  [
+    generateUUID(),   // event UUID
+    requestId,        // lesson_request identity
+    row.id,           // instructor_id column
+    JSON.stringify({
+      wave: 1
+    })
+  ]
+);
       }
 
       return {
