@@ -153,7 +153,7 @@ async function sendNextWaveOffers(client, requestId, wave) {
       [
         uuidv4(),
         requestId,
-        instructor.instructor_id
+        instructor.instructor_id,
         JSON.stringify({ wave })
       ]
     );
