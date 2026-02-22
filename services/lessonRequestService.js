@@ -216,6 +216,110 @@ export async function acceptOffer(req, res) {
         throw new Error("Lesson request not found");
       }
 
+// ============================
+// VALIDATION SECTION
+// ============================
+
+// 1️⃣ Reject if request already expired
+const expiredCheck = await client.query(
+  `
+  SELECT 1
+  FROM event
+  WHERE identity_id = $1
+  AND event_type = 'lesson_request_expired'
+  LIMIT 1
+  `,
+  [requestId]
+);
+
+if (expiredCheck.rowCount > 0) {
+  throw new Error("Request already expired");
+}
+
+
+// 2️⃣ Reject if already confirmed
+const confirmedCheck = await client.query(
+  `
+  SELECT 1
+  FROM event
+  WHERE identity_id = $1
+  AND event_type = 'lesson_confirmed'
+  LIMIT 1
+  `,
+  [requestId]
+);
+
+if (confirmedCheck.rowCount > 0) {
+  throw new Error("Request already confirmed");
+}
+
+
+// 3️⃣ Get current active wave
+const currentWaveResult = await client.query(
+  `
+  SELECT (payload->>'wave')::int AS wave
+  FROM event
+  WHERE identity_id = $1
+  AND event_type = 'lesson_request_dispatch_started'
+  ORDER BY created_at DESC
+  LIMIT 1
+  `,
+  [requestId]
+);
+
+if (currentWaveResult.rowCount === 0) {
+  throw new Error("No active dispatch wave");
+}
+
+const currentWave = currentWaveResult.rows[0].wave;
+
+
+// 4️⃣ Verify instructor has offer in current wave
+const offerResult = await client.query(
+  `
+  SELECT (payload->>'wave')::int AS wave
+  FROM event
+  WHERE identity_id = $1
+  AND event_type = 'lesson_offer_sent'
+  AND instructor_id = $2
+  ORDER BY created_at DESC
+  LIMIT 1
+  `,
+  [requestId, instructorId]
+);
+
+if (offerResult.rowCount === 0) {
+  throw new Error("No offer found for instructor");
+}
+
+const offerWave = offerResult.rows[0].wave;
+
+if (offerWave !== currentWave) {
+  throw new Error("Offer belongs to inactive wave");
+}
+
+
+// 5️⃣ Ensure wave not already completed
+const waveCompletedCheck = await client.query(
+  `
+  SELECT 1
+  FROM event
+  WHERE identity_id = $1
+  AND event_type = 'lesson_request_wave_completed'
+  AND (payload->>'wave')::int = $2
+  LIMIT 1
+  `,
+  [requestId, currentWave]
+);
+
+if (waveCompletedCheck.rowCount > 0) {
+  throw new Error("Wave already completed");
+}
+
+// ============================
+// END VALIDATION SECTION
+// ============================
+
       // Check already confirmed
       const confirmedCheck = await client.query(
         `
@@ -350,3 +454,4 @@ export async function acceptOffer(req, res) {
     res.status(400).json({ error: err.message });
   }
 }
+
