@@ -135,14 +135,14 @@ async function sendNextWaveOffers(client, requestId, wave) {
 
   // Select next eligible instructors
   const { rows: candidates } = await client.query(
-    `
-    SELECT i.id
-    FROM current_online_instructors i
-    WHERE i.id <> ALL($1::uuid[])
-    LIMIT $2
-    `,
-    [offeredIds, WAVE_SIZE]
-  );
+  `
+  SELECT i.instructor_id
+  FROM current_online_instructors i
+  WHERE i.instructor_id <> ALL($1::uuid[])
+  LIMIT $2
+  `,
+  [offeredIds.length ? offeredIds : ['00000000-0000-0000-0000-000000000000'], WAVE_SIZE]
+);
 
   for (const instructor of candidates) {
     await client.query(
@@ -153,7 +153,7 @@ async function sendNextWaveOffers(client, requestId, wave) {
       [
         uuidv4(),
         requestId,
-        instructor.id,
+        instructor.instructor_id
         JSON.stringify({ wave })
       ]
     );
