@@ -135,19 +135,54 @@ async function sendNextWaveOffers(client, requestId, wave) {
 
   // Select next eligible instructors
   const { rows: candidates } = await client.query(
-  `
-  SELECT i.instructor_id
-  FROM current_online_instructors i
-  WHERE i.instructor_id <> ALL($1::uuid[])
-  LIMIT $2
-  `,
-  [offeredIds.length ? offeredIds : ['00000000-0000-0000-0000-000000000000'], WAVE_SIZE]
-);
+    `
+    SELECT i.instructor_id
+    FROM current_online_instructors i
+    WHERE i.instructor_id <> ALL($1::uuid[])
+    LIMIT $2
+    `,
+    [
+      offeredIds.length
+        ? offeredIds
+        : ['00000000-0000-0000-0000-000000000000'],
+      WAVE_SIZE
+    ]
+  );
 
+  // 🔥 NEW: If no candidates → expire immediately
+  if (candidates.length === 0) {
+
+    await client.query(
+      `
+      INSERT INTO event (
+        id,
+        identity_id,
+        event_type,
+        payload
+      )
+      VALUES ($1, $2, 'lesson_request_expired', $3)
+      `,
+      [
+        uuidv4(),
+        requestId,
+        JSON.stringify({ reason: "no_available_instructors" })
+      ]
+    );
+
+    return; // stop processing — do NOT create new wave
+  }
+
+  // Insert offers for next wave
   for (const instructor of candidates) {
     await client.query(
       `
-      INSERT INTO event (id, identity_id, event_type, instructor_id, payload)
+      INSERT INTO event (
+        id,
+        identity_id,
+        event_type,
+        instructor_id,
+        payload
+      )
       VALUES ($1, $2, 'lesson_offer_sent', $3, $4)
       `,
       [
