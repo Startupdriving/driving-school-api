@@ -1,5 +1,5 @@
 import express from "express";
-import { confirmPayment } from "../services/paymentService.js";
+import { confirmPayment, completePayout } from "../services/paymentService.js";
 
 const router = express.Router();
 
