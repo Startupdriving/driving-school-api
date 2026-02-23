@@ -391,42 +391,133 @@ export async function acceptOffer(req, res) {
       );
 
       // Insert lesson_scheduled
-      await client.query(
-        `
-        INSERT INTO event (
-          id,
-          identity_id,
-          event_type,
-          payload,
-          instructor_id,
-          car_id,
-          lesson_range
-        )
-        VALUES (
-          $1,
-          $1,
-          'lesson_scheduled',
-          $2,
-          $3,
-          $4,
-          tstzrange($5::timestamptz, $6::timestamptz)
-        )
-        `,
-        [
-          lessonId,
-          JSON.stringify({
-            student_id,
-            instructor_id: instructorId,
-            car_id: carId,
-            start_time,
-            end_time
-          }),
-          instructorId,
-          carId,
-          start_time,
-          end_time
-        ]
-      );
+await client.query(
+  `
+  INSERT INTO event (
+    id,
+    identity_id,
+    event_type,
+    payload,
+    instructor_id,
+    car_id,
+    lesson_range
+  )
+  VALUES (
+    $1,
+    $1,
+    'lesson_scheduled',
+    $2,
+    $3,
+    $4,
+    tstzrange($5::timestamptz, $6::timestamptz)
+  )
+  `,
+  [
+    lessonId,
+    JSON.stringify({
+      student_id,
+      instructor_id: instructorId,
+      car_id: carId,
+      start_time,
+      end_time
+    }),
+    instructorId,
+    carId,
+    start_time,
+    end_time
+  ]
+);
+
+// ============================
+// FINANCIAL ENGINE START
+// ============================
+
+// 1️⃣ Fixed lesson price (later dynamic)
+const lessonPrice = 2000; // PKR
+
+// Insert lesson_price_calculated under lesson identity
+await client.query(
+  `
+  INSERT INTO event (
+    id,
+    identity_id,
+    event_type,
+    payload
+  )
+  VALUES ($1, $2, 'lesson_price_calculated', $3)
+  `,
+  [
+    generateUUID(),
+    lessonId,
+    JSON.stringify({
+      price: lessonPrice,
+      currency: "PKR"
+    })
+  ]
+);
+
+// 2️⃣ Create payment identity
+const paymentId = generateUUID();
+
+await client.query(
+  `
+  INSERT INTO identity (id, identity_type)
+  VALUES ($1, 'payment')
+  `,
+  [paymentId]
+);
+
+// 3️⃣ Insert payment_created
+await client.query(
+  `
+  INSERT INTO event (
+    id,
+    identity_id,
+    event_type,
+    payload
+  )
+  VALUES ($1, $2, 'payment_created', $3)
+  `,
+  [
+    generateUUID(),
+    paymentId,
+    JSON.stringify({
+      lesson_id: lessonId,
+      amount: lessonPrice,
+      currency: "PKR"
+    })
+  ]
+);
+
+// 4️⃣ Insert payment_requested
+await client.query(
+  `
+  INSERT INTO event (
+    id,
+    identity_id,
+    event_type,
+    payload
+  )
+  VALUES ($1, $2, 'payment_requested', $3)
+  `,
+  [
+    generateUUID(),
+    paymentId,
+    JSON.stringify({
+      lesson_id: lessonId
+    })
+  ]
+);
+
+// ============================
+// FINANCIAL ENGINE END
+// ============================
+
+return {
+  message: "Offer accepted and lesson scheduled",
+  lesson_id: lessonId,
+  payment_id: paymentId
+};
 
       return {
         message: "Offer accepted and lesson scheduled",
