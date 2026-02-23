@@ -20,14 +20,24 @@ export async function requestLesson(req, res) {
     const response = await withIdempotency(req, async (client) => {
 
       const {
-        student_id,
-        requested_start_time,
-        requested_end_time
-      } = req.body;
+  student_id,
+  requested_start_time,
+  requested_end_time,
+  pickup_lat,
+  pickup_lng
+} = req.body;
 
-      if (!student_id || !requested_start_time || !requested_end_time) {
-        throw new Error("student_id, requested_start_time, requested_end_time required");
-      }
+      if (
+  !student_id ||
+  !requested_start_time ||
+  !requested_end_time ||
+  pickup_lat === undefined ||
+  pickup_lng === undefined
+) {
+  throw new Error(
+    "student_id, requested_start_time, requested_end_time, pickup_lat, pickup_lng required"
+  );
+}
 
       if (!isValidUUID(student_id)) {
         throw new Error("Invalid student_id");
@@ -70,12 +80,14 @@ await client.query(
     tstzrange($3::timestamptz, $4::timestamptz)
   )
   `,
-  [
+   [
     requestId,
     JSON.stringify({
       student_id,
       requested_start_time,
-      requested_end_time
+      requested_end_time,
+      pickup_lat,
+      pickup_lng
     }),
     requested_start_time,
     requested_end_time
