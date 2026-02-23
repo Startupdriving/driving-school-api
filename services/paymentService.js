@@ -107,3 +107,85 @@ export async function confirmPayment(req, res) {
     res.status(400).json({ error: err.message });
   }
 }
+
+export async function completePayout(req, res) {
+  try {
+    const response = await withIdempotency(req, async (client) => {
+
+      const { payment_id } = req.body;
+
+      if (!payment_id) {
+        throw new Error("payment_id required");
+      }
+
+      // 🔒 Lock payment identity
+      const lock = await client.query(
+        `
+        SELECT id
+        FROM identity
+        WHERE id = $1
+        AND identity_type = 'payment'
+        FOR UPDATE
+        `,
+        [payment_id]
+      );
+
+      if (lock.rowCount === 0) {
+        throw new Error("Payment not found");
+      }
+
+      // Ensure payment_confirmed exists
+      const confirmed = await client.query(
+        `
+        SELECT 1
+        FROM event
+        WHERE identity_id = $1
+        AND event_type = 'payment_confirmed'
+        LIMIT 1
+        `,
+        [payment_id]
+      );
+
+      if (confirmed.rowCount === 0) {
+        throw new Error("Payment not confirmed yet");
+      }
+
+      // Prevent double payout
+      const alreadyPaid = await client.query(
+        `
+        SELECT 1
+        FROM event
+        WHERE identity_id = $1
+        AND event_type = 'payout_completed'
+        LIMIT 1
+        `,
+        [payment_id]
+      );
+
+      if (alreadyPaid.rowCount > 0) {
+        throw new Error("Payout already completed");
+      }
+
+      await client.query(
+        `
+        INSERT INTO event (id, identity_id, event_type, payload)
+        VALUES ($1, $2, 'payout_completed', $3)
+        `,
+        [
+          uuidv4(),
+          payment_id,
+          JSON.stringify({
+            paid_at: new Date()
+          })
+        ]
+      );
+
+      return { message: "Payout completed" };
+    });
+
+    res.json(response);
+
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+}
