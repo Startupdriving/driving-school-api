@@ -1,6 +1,7 @@
 import pool from "../db.js";
 import { v4 as uuidv4 } from "uuid";
 
+const MAX_ACTIVE_OFFERS_PER_INSTRUCTOR = 3;
 const WAVE_SIZE = 3;
 const MAX_WAVES = 3;
 const WAVE_TIMEOUT_SECONDS = 300;
@@ -118,19 +119,24 @@ async function sendNextWaveOffers(client, requestId, wave) {
 
   // Select next eligible instructors
   const { rows: candidates } = await client.query(
-    `
-    SELECT i.instructor_id
-    FROM current_online_instructors i
-    WHERE i.instructor_id <> ALL($1::uuid[])
-    LIMIT $2
-    `,
-    [
-      offeredIds.length
-        ? offeredIds
-        : ['00000000-0000-0000-0000-000000000000'],
-      WAVE_SIZE
-    ]
-  );
+  `
+  SELECT i.instructor_id
+  FROM current_online_instructors i
+  LEFT JOIN current_instructor_active_offers a
+    ON i.instructor_id = a.instructor_id
+  WHERE i.instructor_id <> ALL($1::uuid[])
+  AND COALESCE(a.active_offers, 0) < $3
+  ORDER BY COALESCE(a.active_offers, 0) ASC
+  LIMIT $2
+  `,
+  [
+    offeredIds.length
+      ? offeredIds
+      : ['00000000-0000-0000-0000-000000000000'],
+    WAVE_SIZE,
+    MAX_ACTIVE_OFFERS_PER_INSTRUCTOR
+  ]
+);
 
   // If no candidates → expire immediately
   if (candidates.length === 0) {
