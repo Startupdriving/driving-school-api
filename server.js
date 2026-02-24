@@ -20,18 +20,6 @@ app.use(express.json());
 
 app.get("/", (req, res) => {
   res.send("API running");
-
-// Run async debug safely
-  (async () => {
-    try {
-      const { rows } = await pool.query(
-        "SELECT version FROM schema_version ORDER BY version"
-      );
-      console.log("📊 Production schema_version:", rows);
-    } catch (err) {
-      console.error("Schema debug failed:", err);
-    }
-  })();
 });
 
 // Read routes
@@ -50,6 +38,9 @@ const PORT = process.env.PORT || 5173;
 
 // Run migrations first
 await runMigrations();
+
+// 🔎 DEBUG: Print which database this container is using
+console.log("🌐 DATABASE_URL:", process.env.DATABASE_URL);
 
 // 🔎 Print schema versions from production DB
 try {
