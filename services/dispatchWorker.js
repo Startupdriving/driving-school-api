@@ -2,12 +2,12 @@ import pool from "../db.js";
 import { v4 as uuidv4 } from "uuid";
 
 const MAX_ACTIVE_OFFERS_PER_INSTRUCTOR = 3;
-const WAVE_SIZE = 3;
+const BASE_WAVE_SIZE = 3;
 const MAX_WAVES = 3;
 const WAVE_TIMEOUT_SECONDS = 300;
 
 let lastRebuildTime = Date.now();
-const REBUILD_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+const REBUILD_INTERVAL_MS = 10 * 60 * 1000; // 10 min
 
 export function startDispatchWorker() {
   console.log("🚀 Dispatch worker started");
@@ -148,13 +148,34 @@ const { rows: candidates } = await client.query(
   LIMIT $2
   `,
   [
+  offeredIds.length
+    ? offeredIds
+    : ['00000000-0000-0000-0000-000000000000'],
+  dynamicWaveSize,
+  MAX_ACTIVE_OFFERS_PER_INSTRUCTOR
+]
+);
+
+// Count eligible instructors for dynamic wave sizing
+const { rows: countRows } = await client.query(
+  `
+  SELECT COUNT(*)::int AS eligible_count
+  FROM current_online_instructors o
+  LEFT JOIN instructor_offer_stats s
+    ON o.instructor_id = s.instructor_id
+  WHERE o.instructor_id <> ALL($1::uuid[])
+  AND o.active_offers < $2
+  `,
+  [
     offeredIds.length
       ? offeredIds
       : ['00000000-0000-0000-0000-000000000000'],
-    WAVE_SIZE,
     MAX_ACTIVE_OFFERS_PER_INSTRUCTOR
   ]
 );
+
+const eligibleCount = countRows[0].eligible_count;
+const dynamicWaveSize = Math.min(BASE_WAVE_SIZE, eligibleCount);
 
   // If no candidates → expire immediately
   if (candidates.length === 0) {
@@ -198,7 +219,7 @@ const { rows: candidates } = await client.query(
       JSON.stringify({
         wave,
         expires_at: expiresAt,
-        wave_size: WAVE_SIZE
+        wave_size: dynamicWaveSize
       })
     ]
   );
