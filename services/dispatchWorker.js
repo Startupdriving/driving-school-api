@@ -121,13 +121,16 @@ async function sendNextWaveOffers(client, requestId, wave) {
   
 const { rows: candidates } = await client.query(
   `
-  SELECT s.instructor_id
-  FROM instructor_scoring s
-  JOIN current_online_instructors o
-    ON s.instructor_id = o.instructor_id
-  WHERE s.instructor_id <> ALL($1::uuid[])
-  AND s.active_offers < $3
-  ORDER BY s.score DESC
+  SELECT o.instructor_id
+  FROM current_online_instructors o
+  LEFT JOIN instructor_offer_stats s
+    ON o.instructor_id = s.instructor_id
+  WHERE o.instructor_id <> ALL($1::uuid[])
+  AND o.active_offers < $3
+  ORDER BY
+    COALESCE(s.offers_last_24h, 0) ASC,
+    COALESCE(s.last_offer_at, '1970-01-01') ASC,
+    o.instructor_id ASC
   LIMIT $2
   `,
   [
