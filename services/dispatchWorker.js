@@ -7,7 +7,7 @@ const MAX_WAVES = 3;
 const WAVE_TIMEOUT_SECONDS = 300;
 
 let lastRebuildTime = Date.now();
-const REBUILD_INTERVAL_MS = 60 * 1000; // 1 minute
+const REBUILD_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 
 export function startDispatchWorker() {
   console.log("🚀 Dispatch worker started");
