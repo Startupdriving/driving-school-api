@@ -48,22 +48,21 @@ app.use("/write/payment", paymentRoutes);
 
 const PORT = process.env.PORT || 5173;
 
-runMigrations().then(() =>{
-  try {
-    const { rows } = await pool.query(
-      "SELECT version FROM schema_version ORDER BY version"
-    );
-    console.log("📊 Production schema_version:", rows);
-  } catch (err) {
-    console.error("Schema debug failed:", err);
-  }
- 
- {
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`API running on port ${PORT}`);
-// Start background dispatch worker
+// Run migrations first
+await runMigrations();
+
+// 🔎 Print schema versions from production DB
+try {
+  const { rows } = await pool.query(
+    "SELECT version FROM schema_version ORDER BY version"
+  );
+  console.log("📊 Production schema_version:", rows);
+} catch (err) {
+  console.error("Schema debug failed:", err);
+}
+
+// Start server
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`API running on port ${PORT}`);
   startDispatchWorker();
-  });
 });
-
-
