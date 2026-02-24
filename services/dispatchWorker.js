@@ -229,3 +229,4 @@ const { rows: candidates } = await client.query(
       [instructorId]
     );
   }
+}
