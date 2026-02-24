@@ -5,18 +5,19 @@ INSERT INTO instructor_offer_stats (
     last_offer_at
 )
 SELECT
-    (payload->>'instructor_id')::uuid,
+    instructor_id,
     COUNT(*) FILTER (
         WHERE event_type = 'lesson_offer_sent'
         AND created_at > NOW() - INTERVAL '24 hours'
-    ),
+    ) AS offers_last_24h,
     COUNT(*) FILTER (
         WHERE event_type = 'lesson_confirmed'
         AND created_at > NOW() - INTERVAL '24 hours'
-    ),
+    ) AS confirmed_last_24h,
     MAX(created_at) FILTER (
         WHERE event_type = 'lesson_offer_sent'
-    )
+    ) AS last_offer_at
 FROM event
 WHERE event_type IN ('lesson_offer_sent', 'lesson_confirmed')
-GROUP BY (payload->>'instructor_id');
+AND instructor_id IS NOT NULL
+GROUP BY instructor_id;
