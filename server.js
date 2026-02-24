@@ -1,3 +1,4 @@
+import pool from "./db.js";
 import paymentRoutes from "./routes/payment.js";
 import { startDispatchWorker } from "./services/dispatchWorker.js";
 import matchingRoutes from "./routes/matching.js";
@@ -47,7 +48,17 @@ app.use("/write/payment", paymentRoutes);
 
 const PORT = process.env.PORT || 5173;
 
-runMigrations().then(() => {
+runMigrations().then(() =>{
+  try {
+    const { rows } = await pool.query(
+      "SELECT version FROM schema_version ORDER BY version"
+    );
+    console.log("📊 Production schema_version:", rows);
+  } catch (err) {
+    console.error("Schema debug failed:", err);
+  }
+ 
+ {
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`API running on port ${PORT}`);
 // Start background dispatch worker
