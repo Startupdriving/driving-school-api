@@ -20,15 +20,17 @@ app.use(express.json());
 app.get("/", (req, res) => {
   res.send("API running");
 
-// 🔎 DEBUG: Print schema versions from production DB
-  try {
-    const { rows } = await pool.query(
-      "SELECT version FROM schema_version ORDER BY version"
-    );
-    console.log("📊 Production schema_version:", rows);
-  } catch (err) {
-    console.error("Schema debug failed:", err);
-  }
+// Run async debug safely
+  (async () => {
+    try {
+      const { rows } = await pool.query(
+        "SELECT version FROM schema_version ORDER BY version"
+      );
+      console.log("📊 Production schema_version:", rows);
+    } catch (err) {
+      console.error("Schema debug failed:", err);
+    }
+  })();
 });
 
 // Read routes
