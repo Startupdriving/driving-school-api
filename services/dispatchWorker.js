@@ -128,9 +128,14 @@ const { rows: candidates } = await client.query(
   WHERE o.instructor_id <> ALL($1::uuid[])
   AND o.active_offers < $3
   ORDER BY
-    COALESCE(s.offers_last_24h, 0) ASC,
-    COALESCE(s.last_offer_at, '1970-01-01') ASC,
-    o.instructor_id ASC
+  COALESCE(
+    (s.confirmed_last_24h::float /
+     NULLIF(s.offers_last_24h, 0)
+    ), 0
+  ) DESC,
+  COALESCE(s.offers_last_24h, 0) ASC,
+  COALESCE(s.last_offer_at, '1970-01-01') ASC,
+  o.instructor_id ASC
   LIMIT $2
   `,
   [
