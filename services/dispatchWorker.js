@@ -186,8 +186,12 @@ const { rows: candidates } = await client.query(
     ]
   );
 
-  // Insert offers
+    // Insert offers + update fairness projection
   for (const instructor of candidates) {
+
+    const instructorId = instructor.instructor_id;
+
+    // 1️⃣ Insert lesson_offer_sent event
     await client.query(
       `
       INSERT INTO event (
@@ -202,9 +206,26 @@ const { rows: candidates } = await client.query(
       [
         uuidv4(),
         requestId,
-        instructor.instructor_id,
+        instructorId,
         JSON.stringify({ wave })
       ]
     );
+
+    // 2️⃣ Update fairness projection (atomic inside same transaction)
+    await client.query(
+      `
+      INSERT INTO instructor_offer_stats (
+        instructor_id,
+        offers_last_24h,
+        last_offer_at
+      )
+      VALUES ($1, 1, NOW())
+      ON CONFLICT (instructor_id)
+      DO UPDATE SET
+        offers_last_24h = instructor_offer_stats.offers_last_24h + 1,
+        last_offer_at = NOW(),
+        updated_at = NOW()
+      `,
+      [instructorId]
+    );
   }
-}

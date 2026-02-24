@@ -391,6 +391,17 @@ export async function acceptOffer(req, res) {
         ]
       );
 
+// 🔥 Update fairness projection for confirmation
+await client.query(
+  `
+  UPDATE instructor_offer_stats
+  SET confirmed_last_24h = confirmed_last_24h + 1,
+      updated_at = NOW()
+  WHERE instructor_id = $1
+  `,
+  [instructorId]
+);
+
       // Create lesson identity
       const lessonId = generateUUID();
 
