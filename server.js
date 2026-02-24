@@ -39,19 +39,6 @@ const PORT = process.env.PORT || 5173;
 // Run migrations first
 await runMigrations();
 
-// 🔎 DEBUG: Print which database this container is using
-console.log("🌐 DATABASE_URL:", process.env.DATABASE_URL);
-
-// 🔎 Print schema versions from production DB
-try {
-  const { rows } = await pool.query(
-    "SELECT version FROM schema_version ORDER BY version"
-  );
-  console.log("📊 Production schema_version:", rows);
-} catch (err) {
-  console.error("Schema debug failed:", err);
-}
-
 // Start server
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`API running on port ${PORT}`);
