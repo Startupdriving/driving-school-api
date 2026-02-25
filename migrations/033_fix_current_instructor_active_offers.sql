@@ -1,6 +1,4 @@
-DROP VIEW IF EXISTS current_instructor_active_offers;
-
-CREATE VIEW current_instructor_active_offers AS
+CREATE OR REPLACE VIEW current_instructor_active_offers AS
 SELECT
     instructor_id,
     COUNT(*) AS active_offers
