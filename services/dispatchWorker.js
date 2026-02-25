@@ -128,14 +128,16 @@ export async function sendNextWaveOffers(client, requestId, wave) {
 
   // Select next eligible instructors
   
-const { rows: candidates } = await client.query(
+  const { rows: candidates } = await client.query(
   `
-  SELECT o.instructor_id
-  FROM current_instructor_runtime_state o
+  SELECT online.instructor_id
+  FROM current_online_instructors online
+  JOIN current_instructor_active_offers capacity
+    ON online.instructor_id = capacity.instructor_id
   LEFT JOIN instructor_offer_stats s
-    ON o.instructor_id = s.instructor_id
-  WHERE o.instructor_id <> ALL($1::uuid[])
-  AND o.active_offers < $3
+    ON online.instructor_id = s.instructor_id
+  WHERE online.instructor_id <> ALL($1::uuid[])
+  AND capacity.active_offers < $3
   ORDER BY
     COALESCE(
       (s.confirmed_last_24h::float /
@@ -144,7 +146,7 @@ const { rows: candidates } = await client.query(
     ) DESC,
     COALESCE(s.offers_last_24h, 0) ASC,
     COALESCE(s.last_offer_at, '1970-01-01') ASC,
-    o.instructor_id ASC
+    online.instructor_id ASC
   LIMIT $2
   `,
   [
