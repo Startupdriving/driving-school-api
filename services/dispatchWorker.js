@@ -111,7 +111,7 @@ async function handleExpiredWave(client, requestId, currentWave) {
 
 
 
-async function sendNextWaveOffers(client, requestId, wave) {
+export async function sendNextWaveOffers(client, requestId, wave) {
 
   // Already offered instructors
   const { rows: offeredRows } = await client.query(
