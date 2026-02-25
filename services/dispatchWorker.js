@@ -137,45 +137,28 @@ const { rows: candidates } = await client.query(
   WHERE o.instructor_id <> ALL($1::uuid[])
   AND o.active_offers < $3
   ORDER BY
-  COALESCE(
-    (s.confirmed_last_24h::float /
-     NULLIF(s.offers_last_24h, 0)
-    ), 0
-  ) DESC,
-  COALESCE(s.offers_last_24h, 0) ASC,
-  COALESCE(s.last_offer_at, '1970-01-01') ASC,
-  o.instructor_id ASC
+    COALESCE(
+      (s.confirmed_last_24h::float /
+       NULLIF(s.offers_last_24h, 0)
+      ), 0
+    ) DESC,
+    COALESCE(s.offers_last_24h, 0) ASC,
+    COALESCE(s.last_offer_at, '1970-01-01') ASC,
+    o.instructor_id ASC
   LIMIT $2
-  `,
-  [
-  offeredIds.length
-    ? offeredIds
-    : ['00000000-0000-0000-0000-000000000000'],
-  dynamicWaveSize,
-  MAX_ACTIVE_OFFERS_PER_INSTRUCTOR
-]
-);
-
-// Count eligible instructors for dynamic wave sizing
-const { rows: countRows } = await client.query(
-  `
-  SELECT COUNT(*)::int AS eligible_count
-  FROM current_online_instructors o
-  LEFT JOIN instructor_offer_stats s
-    ON o.instructor_id = s.instructor_id
-  WHERE o.instructor_id <> ALL($1::uuid[])
-  AND o.active_offers < $2
   `,
   [
     offeredIds.length
       ? offeredIds
       : ['00000000-0000-0000-0000-000000000000'],
+    BASE_WAVE_SIZE,
     MAX_ACTIVE_OFFERS_PER_INSTRUCTOR
   ]
 );
 
-const eligibleCount = countRows[0].eligible_count;
-const dynamicWaveSize = Math.min(BASE_WAVE_SIZE, eligibleCount);
+const dynamicWaveSize = candidates.length;
+
+// Count eligible instructors for dynamic wave sizing
 
   // If no candidates → expire immediately
   if (candidates.length === 0) {
