@@ -158,8 +158,6 @@ const { rows: candidates } = await client.query(
 
 const dynamicWaveSize = candidates.length;
 
-// Count eligible instructors for dynamic wave sizing
-
   // If no candidates → expire immediately
   if (candidates.length === 0) {
 

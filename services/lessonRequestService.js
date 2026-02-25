@@ -1,3 +1,4 @@
+import { sendNextWaveOffers } from "./dispatchWorker.js";
 import { v4 as uuidv4 } from "uuid";
 import { withIdempotency } from "./idempotencyService.js";
 import crypto from "crypto";
@@ -93,42 +94,7 @@ await client.query(
     requested_end_time
   ]
 );
-
-
-      // 2️⃣ Insert lesson_request_dispatch_started (Wave 1)
-
-      const WAVE_SIZE = 3;
-      const WAVE_TIMEOUT_SECONDS = 300;
-
-      const expiresAt = new Date(
-      Date.now() + WAVE_TIMEOUT_SECONDS * 1000
-      );
-
-      await client.query(
-      `
-      INSERT INTO event (
-      id,
-      identity_id,
-      event_type,
-      payload
-      )
-      VALUES (
-      $1,
-      $2,
-      'lesson_request_dispatch_started',
-      $3
-       )
-  `,
-  [
-    uuidv4(),
-    requestId,
-    JSON.stringify({
-      wave: 1,
-      expires_at: expiresAt,
-      wave_size: WAVE_SIZE
-    })
-  ]
-);
+      await sendNextWaveOffers(client, requestId, 1);
 
       // AUTO MATCHING (Top 3 eligible instructors)
       const eligible = await client.query(
