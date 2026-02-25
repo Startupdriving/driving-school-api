@@ -131,7 +131,7 @@ export async function sendNextWaveOffers(client, requestId, wave) {
 const { rows: candidates } = await client.query(
   `
   SELECT o.instructor_id
-  FROM current_online_instructors o
+  FROM current_instructor_runtime_state o
   LEFT JOIN instructor_offer_stats s
     ON o.instructor_id = s.instructor_id
   WHERE o.instructor_id <> ALL($1::uuid[])
