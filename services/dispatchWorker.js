@@ -4,7 +4,7 @@ import { v4 as uuidv4 } from "uuid";
 const MAX_ACTIVE_OFFERS_PER_INSTRUCTOR = 3;
 const BASE_WAVE_SIZE = 3;
 const MAX_WAVES = 3;
-const WAVE_TIMEOUT_SECONDS = 300;
+const WAVE_TIMEOUT_SECONDS = 20;
 
 let lastRebuildTime = Date.now();
 const REBUILD_INTERVAL_MS = 10 * 60 * 1000; // 10 min
