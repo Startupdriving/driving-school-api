@@ -132,12 +132,12 @@ export async function sendNextWaveOffers(client, requestId, wave) {
   `
   SELECT online.instructor_id
   FROM current_online_instructors online
-  JOIN current_instructor_active_offers capacity
+  LEFT JOIN current_instructor_active_offers capacity
     ON online.instructor_id = capacity.instructor_id
   LEFT JOIN instructor_scoring s
     ON online.instructor_id = s.instructor_id
   WHERE online.instructor_id <> ALL($1::uuid[])
-  AND capacity.active_offers < $3
+  AND COALESCE(capacity.active_offers, 0) < $3
     ORDER BY
   COALESCE(s.economic_score, 0) DESC,
   COALESCE(s.offers_last_24h, 0) ASC,
