@@ -134,19 +134,15 @@ export async function sendNextWaveOffers(client, requestId, wave) {
   FROM current_online_instructors online
   JOIN current_instructor_active_offers capacity
     ON online.instructor_id = capacity.instructor_id
-  LEFT JOIN instructor_offer_stats s
+  LEFT JOIN instructor_scoring s
     ON online.instructor_id = s.instructor_id
   WHERE online.instructor_id <> ALL($1::uuid[])
   AND capacity.active_offers < $3
-  ORDER BY
-    COALESCE(
-      (s.confirmed_last_24h::float /
-       NULLIF(s.offers_last_24h, 0)
-      ), 0
-    ) DESC,
-    COALESCE(s.offers_last_24h, 0) ASC,
-    COALESCE(s.last_offer_at, '1970-01-01') ASC,
-    online.instructor_id ASC
+    ORDER BY
+  COALESCE(s.economic_score, 0) DESC,
+  COALESCE(s.offers_last_24h, 0) ASC,
+  COALESCE(s.last_offer_at, '1970-01-01') ASC,
+  online.instructor_id ASC
   LIMIT $2
   `,
   [
