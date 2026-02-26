@@ -96,58 +96,6 @@ await client.query(
 );
       await sendNextWaveOffers(client, requestId, 1);
 
-      // AUTO MATCHING (Top 3 eligible instructors)
-      const eligible = await client.query(
-        `
-        SELECT i.id
-        FROM identity i
-        JOIN current_online_instructors o
-          ON i.id = o.instructor_id
-        WHERE i.identity_type = 'instructor'
-        AND NOT EXISTS (
-          SELECT 1 FROM event e
-          WHERE e.instructor_id = i.id
-          AND e.event_type = 'lesson_scheduled'
-          AND e.lesson_range && tstzrange($1::timestamptz, $2::timestamptz)
-          AND NOT EXISTS (
-            SELECT 1 FROM event c
-            WHERE c.identity_id = e.identity_id
-            AND c.event_type = 'lesson_cancelled'
-          )
-        )
-        LIMIT 3
-        `,
-        [requested_start_time, requested_end_time]
-      );
-
-      for (const row of eligible.rows) {
-        await client.query(
-  `
-  INSERT INTO event (
-    id,
-    identity_id,
-    event_type,
-    instructor_id,
-    payload
-  )
-  VALUES (
-    $1,
-    $2,
-    'lesson_offer_sent',
-    $3,
-    $4
-  )
-  `,
-  [
-    generateUUID(),   // event UUID
-    requestId,        // lesson_request identity
-    row.id,           // instructor_id column
-    JSON.stringify({
-      wave: 1
-    })
-  ]
-);
-      }
 
       return {
         message: "Lesson request created and offers dispatched",
