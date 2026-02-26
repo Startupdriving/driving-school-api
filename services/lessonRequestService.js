@@ -99,8 +99,7 @@ await client.query(
 
       return {
         message: "Lesson request created and offers dispatched",
-        lesson_request_id: requestId,
-        offers_sent: eligible.rows.map(r => r.id)
+        lesson_request_id: requestId
       };
 
     });
