@@ -112,6 +112,19 @@ async function handleExpiredWave(client, requestId, currentWave) {
 
 export async function sendNextWaveOffers(client, requestId, wave) {
 
+// 🔥 Fetch student_id for this request
+const { rows: studentRow } = await client.query(`
+  SELECT payload->>'student_id' AS student_id
+  FROM event
+  WHERE identity_id = $1
+  AND event_type = 'lesson_requested'
+  LIMIT 1
+`, [requestId]);
+
+const studentId = studentRow.length > 0
+  ? studentRow[0].student_id
+  : null;
+
   // Already offered instructors
   const { rows: offeredRows } = await client.query(
     `
@@ -137,6 +150,19 @@ const adaptiveWaveSize =
     ? waveRow[0].suggested_wave_size
     : 1;
 
+// 🔥 Fetch student_id for this request
+const { rows: studentRow } = await client.query(`
+  SELECT payload->>'student_id' AS student_id
+  FROM event
+  WHERE identity_id = $1
+  AND event_type = 'lesson_requested'
+  LIMIT 1
+`, [requestId]);
+
+const studentId = studentRow.length > 0
+  ? studentRow[0].student_id
+  : null;
+
   // Select next eligible instructors
   
   const { rows: candidates } = await client.query(
@@ -160,12 +186,17 @@ const adaptiveWaveSize =
     offeredIds.length
       ? offeredIds
       : ['00000000-0000-0000-0000-000000000000'],
-    adaptiveWaveSize,
+    dynamicWaveSize,
     MAX_ACTIVE_OFFERS_PER_INSTRUCTOR
   ]
 );
 
-const dynamicWaveSize = adaptiveWaveSize;
+const adjustedWaveSize = Math.max(
+  1,
+  Math.floor(adaptiveWaveSize * demandMultiplier)
+);
+
+const dynamicWaveSize = adjustedWaveSize;
 
   // If no candidates → expire immediately
   if (candidates.length === 0) {
