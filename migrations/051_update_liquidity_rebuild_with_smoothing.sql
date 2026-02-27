@@ -1,17 +1,20 @@
 -- 051_update_liquidity_rebuild_with_smoothing.sql
 
+-- Ensure columns exist (idempotent safety)
+ALTER TABLE marketplace_liquidity_pressure
+ADD COLUMN IF NOT EXISTS raw_wave_size INT DEFAULT 1;
+
+ALTER TABLE marketplace_liquidity_pressure
+ADD COLUMN IF NOT EXISTS smoothed_wave_size NUMERIC DEFAULT 1;
+
 WITH liquidity_calc AS (
     SELECT
-        COUNT(*) FILTER (
-            WHERE runtime_state = 'online'
-        ) AS online_instructors,
+        (SELECT COUNT(*) FROM current_instructor_runtime_state
+         WHERE runtime_state = 'online') AS online_instructors,
 
-        COUNT(*) FILTER (
-            WHERE event_type = 'lesson_requested'
-            AND created_at > NOW() - INTERVAL '5 minutes'
-        ) AS recent_requests
-    FROM current_instructor_runtime_state
-    CROSS JOIN event
+        (SELECT COUNT(*) FROM event
+         WHERE event_type = 'lesson_requested'
+         AND created_at > NOW() - INTERVAL '5 minutes') AS recent_requests
 ),
 
 raw_wave AS (
@@ -30,9 +33,7 @@ raw_wave AS (
 ),
 
 previous_state AS (
-    SELECT
-        raw_wave_size,
-        smoothed_wave_size
+    SELECT raw_wave_size, smoothed_wave_size
     FROM marketplace_liquidity_pressure
     WHERE id = true
 ),
