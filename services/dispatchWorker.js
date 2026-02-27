@@ -160,8 +160,8 @@ if (studentId) {
 `, [studentId]);
 
   const reliability =
-    reliabilityRow.length > 0
-      ? parseFloat(reliabilityRow[0].reliability_score)
+    reliabilityRows.length > 0
+      ? parseFloat(reliabilityRows[0].reliability_score)
       : 0;
 
   if (reliability < 0) {
