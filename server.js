@@ -44,4 +44,13 @@ await runMigrations();
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`API running on port ${PORT}`);
   startDispatchWorker();
+  // 🔄 Start liquidity scheduler
+  setInterval(async () => {
+    try {
+      await rebuildLiquidity();
+      console.log("Liquidity rebuild executed");
+    } catch (err) {
+      console.error("Liquidity scheduler error:", err);
+    }
+  }, 10000); // every 10 seconds
 });
