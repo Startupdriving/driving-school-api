@@ -1,3 +1,4 @@
+import { rebuildLiquidity } from "./services/liquidityService.js";
 import pool from "./db.js";
 import paymentRoutes from "./routes/payment.js";
 import { startDispatchWorker } from "./services/dispatchWorker.js";
