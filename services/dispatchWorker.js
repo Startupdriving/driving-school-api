@@ -109,160 +109,131 @@ async function handleExpiredWave(client, requestId, currentWave) {
 }
 
 
-
 export async function sendNextWaveOffers(client, requestId, wave) {
 
-// 🔥 Fetch student_id for this request
-const { rows: studentRequestRows } = await client.query(`
-  SELECT payload->>'student_id' AS student_id
-  FROM event
-  WHERE identity_id = $1
-  AND event_type = 'lesson_requested'
-  LIMIT 1
-`, [requestId]);
+  // 🔥 Fetch student_id for this request
+  const { rows: studentRequestRows } = await client.query(`
+    SELECT payload->>'student_id' AS student_id
+    FROM event
+    WHERE identity_id = $1
+    AND event_type = 'lesson_requested'
+    LIMIT 1
+  `, [requestId]);
 
-const studentId = studentRequestRows.length > 0
-  ? studentRequestRows[0].student_id
-  : null;
+  const studentId = studentRequestRows.length > 0
+    ? studentRequestRows[0].student_id
+    : null;
 
   // Already offered instructors
-  const { rows: offeredRows } = await client.query(
-    `
+  const { rows: offeredRows } = await client.query(`
     SELECT instructor_id
     FROM event
     WHERE identity_id = $1
     AND event_type = 'lesson_offer_sent'
-    `,
-    [requestId]
-  );
+  `, [requestId]);
 
   const offeredIds = offeredRows.map(r => r.instructor_id);
 
-// 🔥 Fetch adaptive wave size from liquidity projection
-const { rows: waveRow } = await client.query(`
-  SELECT suggested_wave_size
-  FROM marketplace_liquidity_pressure
-  WHERE id = true
-`);
+  // 🔥 Fetch adaptive wave size
+  const { rows: waveRow } = await client.query(`
+    SELECT suggested_wave_size
+    FROM marketplace_liquidity_pressure
+    WHERE id = true
+  `);
 
-const adaptiveWaveSize =
-  waveRow.length > 0
-    ? waveRow[0].suggested_wave_size
-    : 1;
+  const adaptiveWaveSize =
+    waveRow.length > 0
+      ? parseInt(waveRow[0].suggested_wave_size)
+      : 1;
 
-let demandMultiplier = 1;
+  // 🔥 Fetch student reliability
+  let demandMultiplier = 1;
 
-if (studentId) {
-  const { rows: reliabilityRows } = await client.query(`
-  SELECT reliability_score
-  FROM student_reliability
-  WHERE student_id = $1
-`, [studentId]);
+  if (studentId) {
+    const { rows: reliabilityRows } = await client.query(`
+      SELECT reliability_score
+      FROM student_reliability
+      WHERE student_id = $1
+    `, [studentId]);
 
-  const reliability =
-    reliabilityRows.length > 0
-      ? parseFloat(reliabilityRows[0].reliability_score)
-      : 0;
+    const reliability =
+      reliabilityRows.length > 0
+        ? parseFloat(reliabilityRows[0].reliability_score)
+        : 0;
 
-  if (reliability < 0) {
-    demandMultiplier = 0.5;
-  } else if (reliability < 0.2) {
-    demandMultiplier = 0.75;
-  } else {
-    demandMultiplier = 1;
+    if (reliability < 0) {
+      demandMultiplier = 0.5;
+    } else if (reliability < 0.2) {
+      demandMultiplier = 0.75;
+    }
   }
-}
 
-  // Select next eligible instructors
-  
-  const { rows: candidates } = await client.query(
-  `
-  SELECT online.instructor_id
-  FROM current_online_instructors online
-  LEFT JOIN current_instructor_active_offers capacity
-    ON online.instructor_id = capacity.instructor_id
-  LEFT JOIN instructor_scoring s
-    ON online.instructor_id = s.instructor_id
-  WHERE online.instructor_id <> ALL($1::uuid[])
-  AND COALESCE(capacity.active_offers, 0) < $3
+  // 🔥 Compute final wave size BEFORE candidate query
+  const dynamicWaveSize = Math.max(
+    1,
+    Math.floor(adaptiveWaveSize * demandMultiplier)
+  );
+
+  // 🔥 Select next eligible instructors
+  const { rows: candidates } = await client.query(`
+    SELECT online.instructor_id
+    FROM current_online_instructors online
+    LEFT JOIN current_instructor_active_offers capacity
+      ON online.instructor_id = capacity.instructor_id
+    LEFT JOIN instructor_scoring s
+      ON online.instructor_id = s.instructor_id
+    WHERE online.instructor_id <> ALL($1::uuid[])
+      AND COALESCE(capacity.active_offers, 0) < $3
     ORDER BY
-  COALESCE(s.economic_score, 0) DESC,
-  COALESCE(s.offers_last_24h, 0) ASC,
-  COALESCE(s.last_offer_at, '1970-01-01') ASC,
-  online.instructor_id ASC
-  LIMIT $2
-  `,
-  [
+      COALESCE(s.economic_score, 0) DESC,
+      COALESCE(s.offers_last_24h, 0) ASC,
+      COALESCE(s.last_offer_at, '1970-01-01') ASC,
+      online.instructor_id ASC
+    LIMIT $2
+  `, [
     offeredIds.length
       ? offeredIds
       : ['00000000-0000-0000-0000-000000000000'],
     dynamicWaveSize,
     MAX_ACTIVE_OFFERS_PER_INSTRUCTOR
-  ]
-);
+  ]);
 
-const adjustedWaveSize = Math.max(
-  1,
-  Math.floor(adaptiveWaveSize * demandMultiplier)
-);
-
-const dynamicWaveSize = adjustedWaveSize;
-
-  // If no candidates → expire immediately
+  // If no candidates → expire
   if (candidates.length === 0) {
-
-    await client.query(
-      `
-      INSERT INTO event (
-        id,
-        identity_id,
-        event_type,
-        payload
-      )
+    await client.query(`
+      INSERT INTO event (id, identity_id, event_type, payload)
       VALUES ($1, $2, 'lesson_request_expired', $3)
-      `,
-      [
-        uuidv4(),
-        requestId,
-        JSON.stringify({ reason: "no_available_instructors" })
-      ]
-    );
+    `, [
+      uuidv4(),
+      requestId,
+      JSON.stringify({ reason: "no_available_instructors" })
+    ]);
 
     return;
   }
 
-  // 🔥 Start next wave ONLY if candidates exist
+  // 🔥 Start next wave
   const expiresAt = new Date(Date.now() + WAVE_TIMEOUT_SECONDS * 1000);
 
-  await client.query(
-    `
-    INSERT INTO event (
-      id,
-      identity_id,
-      event_type,
-      payload
-    )
+  await client.query(`
+    INSERT INTO event (id, identity_id, event_type, payload)
     VALUES ($1, $2, 'lesson_request_dispatch_started', $3)
-    `,
-    [
-      uuidv4(),
-      requestId,
-      JSON.stringify({
-        wave,
-        expires_at: expiresAt,
-        wave_size: dynamicWaveSize
-      })
-    ]
-  );
+  `, [
+    uuidv4(),
+    requestId,
+    JSON.stringify({
+      wave,
+      expires_at: expiresAt,
+      wave_size: dynamicWaveSize
+    })
+  ]);
 
-    // Insert offers + update fairness projection
+  // Insert offers
   for (const instructor of candidates) {
 
     const instructorId = instructor.instructor_id;
 
-    // 1️⃣ Insert lesson_offer_sent event
-    await client.query(
-      `
+    await client.query(`
       INSERT INTO event (
         id,
         identity_id,
@@ -271,18 +242,14 @@ const dynamicWaveSize = adjustedWaveSize;
         payload
       )
       VALUES ($1, $2, 'lesson_offer_sent', $3, $4)
-      `,
-      [
-        uuidv4(),
-        requestId,
-        instructorId,
-        JSON.stringify({ wave })
-      ]
-    );
+    `, [
+      uuidv4(),
+      requestId,
+      instructorId,
+      JSON.stringify({ wave })
+    ]);
 
-    // 2️⃣ Update fairness projection (atomic inside same transaction)
-    await client.query(
-      `
+    await client.query(`
       INSERT INTO instructor_offer_stats (
         instructor_id,
         offers_last_24h,
@@ -294,11 +261,10 @@ const dynamicWaveSize = adjustedWaveSize;
         offers_last_24h = instructor_offer_stats.offers_last_24h + 1,
         last_offer_at = NOW(),
         updated_at = NOW()
-      `,
-      [instructorId]
-    );
+    `, [instructorId]);
   }
 }
+
 
 async function rebuildFairnessProjection(client) {
   await client.query(`
