@@ -2,7 +2,6 @@ import pool from "../db.js";
 import { v4 as uuidv4 } from "uuid";
 
 const MAX_ACTIVE_OFFERS_PER_INSTRUCTOR = 3;
-const BASE_WAVE_SIZE = 3;
 const MAX_WAVES = 3;
 const WAVE_TIMEOUT_SECONDS = 20;
 
@@ -126,6 +125,18 @@ export async function sendNextWaveOffers(client, requestId, wave) {
 
   const offeredIds = offeredRows.map(r => r.instructor_id);
 
+// 🔥 Fetch adaptive wave size from liquidity projection
+const { rows: waveRow } = await client.query(`
+  SELECT suggested_wave_size
+  FROM marketplace_liquidity_pressure
+  WHERE id = true
+`);
+
+const adaptiveWaveSize =
+  waveRow.length > 0
+    ? waveRow[0].suggested_wave_size
+    : 1;
+
   // Select next eligible instructors
   
   const { rows: candidates } = await client.query(
@@ -149,12 +160,12 @@ export async function sendNextWaveOffers(client, requestId, wave) {
     offeredIds.length
       ? offeredIds
       : ['00000000-0000-0000-0000-000000000000'],
-    BASE_WAVE_SIZE,
+    adaptiveWaveSize,
     MAX_ACTIVE_OFFERS_PER_INSTRUCTOR
   ]
 );
 
-const dynamicWaveSize = candidates.length;
+const dynamicWaveSize = adaptiveWaveSize;
 
   // If no candidates → expire immediately
   if (candidates.length === 0) {
