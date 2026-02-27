@@ -113,7 +113,7 @@ async function handleExpiredWave(client, requestId, currentWave) {
 export async function sendNextWaveOffers(client, requestId, wave) {
 
 // 🔥 Fetch student_id for this request
-const { rows: studentRow } = await client.query(`
+const { rows: studentRequestRows } = await client.query(`
   SELECT payload->>'student_id' AS student_id
   FROM event
   WHERE identity_id = $1
@@ -121,8 +121,8 @@ const { rows: studentRow } = await client.query(`
   LIMIT 1
 `, [requestId]);
 
-const studentId = studentRow.length > 0
-  ? studentRow[0].student_id
+const studentId = studentRequestRows.length > 0
+  ? studentRequestRows[0].student_id
   : null;
 
   // Already offered instructors
@@ -150,18 +150,28 @@ const adaptiveWaveSize =
     ? waveRow[0].suggested_wave_size
     : 1;
 
-// 🔥 Fetch student_id for this request
-const { rows: studentRow } = await client.query(`
-  SELECT payload->>'student_id' AS student_id
-  FROM event
-  WHERE identity_id = $1
-  AND event_type = 'lesson_requested'
-  LIMIT 1
-`, [requestId]);
+let demandMultiplier = 1;
 
-const studentId = studentRow.length > 0
-  ? studentRow[0].student_id
-  : null;
+if (studentId) {
+  const { rows: reliabilityRows } = await client.query(`
+  SELECT reliability_score
+  FROM student_reliability
+  WHERE student_id = $1
+`, [studentId]);
+
+  const reliability =
+    reliabilityRow.length > 0
+      ? parseFloat(reliabilityRow[0].reliability_score)
+      : 0;
+
+  if (reliability < 0) {
+    demandMultiplier = 0.5;
+  } else if (reliability < 0.2) {
+    demandMultiplier = 0.75;
+  } else {
+    demandMultiplier = 1;
+  }
+}
 
   // Select next eligible instructors
   
