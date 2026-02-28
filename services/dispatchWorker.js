@@ -125,20 +125,17 @@ export async function sendNextWaveOffers(client, requestId, wave) {
     : null;
 
 // 🔥 Fetch request zone
-const { rows: zoneRows } = await client.query(
-  `
-  SELECT payload->>'zone_id' AS zone_id
+const { rows: zoneRows } = await client.query(`
+  SELECT (payload->>'zone_id')::int AS zone_id
   FROM event
   WHERE identity_id = $1
   AND event_type = 'lesson_requested'
   LIMIT 1
-  `,
-  [requestId]
-);
+`, [requestId]);
 
 const requestZoneId =
-  zoneRows.length > 0 && zoneRows[0].zone_id
-    ? parseInt(zoneRows[0].zone_id)
+  zoneRows.length > 0
+    ? zoneRows[0].zone_id
     : null;
   
   // Already offered instructors
@@ -192,47 +189,55 @@ const requestZoneId =
   );
 
   // 🔥 Select next eligible instructors
-  const { rows: candidates } = await client.query(`
-    SELECT
-  online.instructor_id,
-  COALESCE(s.economic_score, 0)
-  +
-  CASE
-    WHEN i.home_zone_id = $4 THEN 0.20
-    WHEN ez.zone_id IS NOT NULL THEN 0.10
-    ELSE 0
-  END AS final_score
-
+  const { rows: candidates } = await client.query(
+`
+SELECT
+  online.instructor_id
 FROM current_online_instructors online
-
-LEFT JOIN current_instructor_active_offers capacity
-  ON online.instructor_id = capacity.instructor_id
-
-LEFT JOIN instructor_scoring s
-  ON online.instructor_id = s.instructor_id
 
 LEFT JOIN identity i
   ON online.instructor_id = i.id
 
-LEFT JOIN instructor_enabled_zones ez
-  ON ez.instructor_id = online.instructor_id
-  AND ez.zone_id = $4
+LEFT JOIN instructor_scoring s
+  ON online.instructor_id = s.instructor_id
+
+LEFT JOIN zone_distance_matrix zdm
+  ON zdm.from_zone_id = i.home_zone_id
+  AND zdm.to_zone_id = $4
+
+LEFT JOIN current_instructor_active_offers capacity
+  ON online.instructor_id = capacity.instructor_id
 
 WHERE online.instructor_id <> ALL($1::uuid[])
 AND COALESCE(capacity.active_offers, 0) < $3
 
-ORDER BY final_score DESC,
-         online.instructor_id ASC
+ORDER BY
+  (
+    COALESCE(s.economic_score, 0)
+
+    + CASE
+        WHEN i.home_zone_id = $4 THEN 0.20
+        ELSE 0
+      END
+
+    - COALESCE(zdm.penalty_score, 0)
+  ) DESC,
+
+  COALESCE(s.offers_last_24h, 0) ASC,
+  COALESCE(s.last_offer_at, '1970-01-01') ASC,
+  online.instructor_id ASC
 
 LIMIT $2
-  `, [
+`,
+[
   offeredIds.length
     ? offeredIds
     : ['00000000-0000-0000-0000-000000000000'],
   dynamicWaveSize,
   MAX_ACTIVE_OFFERS_PER_INSTRUCTOR,
   requestZoneId
-]);
+]
+);
 
   // If no candidates → expire
   if (candidates.length === 0) {
