@@ -1,69 +1,99 @@
-import pool from "../db.js";
+import db from "../db.js"; // adjust if needed
 
 export async function rebuildLiquidity() {
-  const client = await pool.connect();
+  const client = await db.connect();
 
   try {
     await client.query("BEGIN");
 
-    await client.query(`
-      -- Call smoothing update logic directly
-      WITH liquidity_calc AS (
-          SELECT
-              (SELECT COUNT(*) FROM current_instructor_runtime_state
-               WHERE runtime_state = 'online') AS online_instructors,
-
-              (SELECT COUNT(*) FROM event
-               WHERE event_type = 'lesson_requested'
-               AND created_at > NOW() - INTERVAL '5 minutes') AS recent_requests
-      ),
-      raw_wave AS (
-          SELECT
-              GREATEST(
-                  1,
-                  LEAST(
-                      5,
-                      CEIL(
-                          COALESCE(recent_requests::numeric, 0)
-                          / NULLIF(online_instructors, 0)
-                      )
-                  )
-              )::int AS new_raw_wave_size
-          FROM liquidity_calc
-      ),
-      previous_state AS (
-          SELECT raw_wave_size, smoothed_wave_size
-          FROM marketplace_liquidity_pressure
-          WHERE id = true
-      ),
-      smoothing AS (
-          SELECT
-              r.new_raw_wave_size,
-              COALESCE(
-                  (p.smoothed_wave_size * 0.7) +
-                  (r.new_raw_wave_size * 0.3),
-                  r.new_raw_wave_size
-              ) AS new_smoothed_wave
-          FROM raw_wave r
-          LEFT JOIN previous_state p ON true
-      )
-      UPDATE marketplace_liquidity_pressure
-      SET
-          raw_wave_size = s.new_raw_wave_size,
-          smoothed_wave_size = s.new_smoothed_wave,
-          suggested_wave_size = GREATEST(
-              1,
-              LEAST(5, ROUND(s.new_smoothed_wave)::int)
-          ),
-          updated_at = NOW()
-      FROM smoothing s
-      WHERE id = true;
+    // 1️⃣ Fetch all zones
+    const { rows: zones } = await client.query(`
+      SELECT id FROM geo_zones
     `);
 
+    for (const zone of zones) {
+      const zoneId = zone.id;
+
+      // 2️⃣ Count online instructors in zone
+      const { rows: onlineRows } = await client.query(`
+        SELECT COUNT(*)::int AS online
+        FROM current_online_instructors online
+        JOIN identity i ON online.instructor_id = i.id
+        WHERE i.home_zone_id = $1
+      `, [zoneId]);
+
+      const online = onlineRows[0].online;
+
+      // 3️⃣ Count recent requests (5 minutes)
+      const { rows: requestRows } = await client.query(`
+        SELECT COUNT(*)::int AS recent_requests
+        FROM event
+        WHERE event_type = 'lesson_requested'
+        AND (payload->>'zone_id')::int = $1
+        AND created_at > NOW() - INTERVAL '5 minutes'
+      `, [zoneId]);
+
+      const recentRequests = requestRows[0].recent_requests;
+
+      // 4️⃣ Compute pressure
+      const pressure = recentRequests / Math.max(online, 1);
+
+      // 5️⃣ Compute raw wave size
+      let rawWave = Math.ceil(pressure * 2);
+
+      // Clamp raw between 1 and 5
+      rawWave = Math.max(1, Math.min(5, rawWave));
+
+      // 6️⃣ Get previous smoothed value
+      const { rows: prevRows } = await client.query(`
+        SELECT smoothed_wave_size
+        FROM zone_liquidity_pressure
+        WHERE zone_id = $1
+      `, [zoneId]);
+
+      const previousSmoothed = prevRows.length > 0
+        ? parseFloat(prevRows[0].smoothed_wave_size)
+        : 1;
+
+      // 7️⃣ Apply smoothing (EWMA)
+      let smoothed = previousSmoothed * 0.7 + rawWave * 0.3;
+
+      // 8️⃣ Oscillation clamp (±1 per cycle)
+      const maxUp = previousSmoothed + 1;
+      const maxDown = previousSmoothed - 1;
+
+      smoothed = Math.min(smoothed, maxUp);
+      smoothed = Math.max(smoothed, maxDown);
+
+      // 9️⃣ Suggested wave
+      const suggested = Math.round(smoothed);
+
+      // 🔟 Update table
+      await client.query(`
+        UPDATE zone_liquidity_pressure
+        SET
+          online_instructors = $1,
+          recent_requests_5m = $2,
+          raw_wave_size = $3,
+          smoothed_wave_size = $4,
+          suggested_wave_size = $5,
+          updated_at = NOW()
+        WHERE zone_id = $6
+      `, [
+        online,
+        recentRequests,
+        rawWave,
+        smoothed,
+        suggested,
+        zoneId
+      ]);
+    }
+
     await client.query("COMMIT");
+
   } catch (err) {
     await client.query("ROLLBACK");
-    console.error("Liquidity rebuild failed:", err);
+    console.error("Zone liquidity rebuild failed:", err);
   } finally {
     client.release();
   }
