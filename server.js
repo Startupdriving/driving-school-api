@@ -52,5 +52,5 @@ app.listen(PORT, "0.0.0.0", () => {
     } catch (err) {
       console.error("Liquidity scheduler error:", err);
     }
-  }, 10000); // every 10 seconds
+  }, 60000); // every 60 seconds
 });
