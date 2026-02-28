@@ -63,6 +63,18 @@ export async function requestLesson(req, res) {
         [requestId]
       );
 
+// 🔥 Resolve geographic zone
+const { rows: zoneRows } = await client.query(
+  `
+  SELECT resolve_zone_id($1, $2) AS zone_id
+  `,
+  [pickup_lat, pickup_lng]
+);
+
+const zoneId = zoneRows.length > 0
+  ? zoneRows[0].zone_id
+  : null;
+
       // 1️⃣ Insert lesson_requested event
 await client.query(
   `
@@ -88,7 +100,8 @@ await client.query(
       requested_start_time,
       requested_end_time,
       pickup_lat,
-      pickup_lng
+      pickup_lng,
+      zone_id: zoneId
     }),
     requested_start_time,
     requested_end_time
