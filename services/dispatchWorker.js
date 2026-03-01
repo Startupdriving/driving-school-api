@@ -205,6 +205,9 @@ LEFT JOIN zone_distance_matrix zdm
   ON zdm.from_zone_id = i.home_zone_id
   AND zdm.to_zone_id = $4
 
+LEFT JOIN instructor_zone_supply_projection izsp
+  ON i.home_zone_id = izsp.zone_id
+
 LEFT JOIN current_instructor_active_offers capacity
   ON online.instructor_id = capacity.instructor_id
 
@@ -212,16 +215,22 @@ WHERE online.instructor_id <> ALL($1::uuid[])
 AND COALESCE(capacity.active_offers, 0) < $3
 
 ORDER BY
-  (
-    COALESCE(s.economic_score, 0)
+   (
+  COALESCE(s.economic_score, 0)
 
-    + CASE
-        WHEN i.home_zone_id = $4 THEN 0.20
-        ELSE 0
-      END
+  + CASE
+      WHEN i.home_zone_id = $4 THEN 0.20
+      ELSE 0
+    END
 
-    - COALESCE(zdm.penalty_score, 0)
-  ) DESC,
+  - COALESCE(zdm.penalty_score, 0)
+
+  - CASE
+      WHEN i.home_zone_id = $4 THEN 0
+      ELSE COALESCE(izsp.drain_risk_score, 0) * 0.15
+    END
+)
+  DESC,
 
   COALESCE(s.offers_last_24h, 0) ASC,
   COALESCE(s.last_offer_at, '1970-01-01') ASC,
