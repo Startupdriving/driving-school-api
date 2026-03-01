@@ -87,6 +87,84 @@ export async function rebuildLiquidity() {
         suggested,
         zoneId
       ]);
+
+// 🔥 Rebuild instructor_zone_supply_projection
+
+await client.query(`
+WITH zone_online AS (
+    SELECT i.home_zone_id AS zone_id,
+           COUNT(*) AS online_count
+    FROM current_online_instructors o
+    JOIN identity i ON i.id = o.instructor_id
+    WHERE i.home_zone_id IS NOT NULL
+    GROUP BY i.home_zone_id
+),
+zone_busy AS (
+    SELECT i.home_zone_id AS zone_id,
+           COUNT(*) AS busy_count
+    FROM current_instructor_active_offers c
+    JOIN identity i ON i.id = c.instructor_id
+    WHERE i.home_zone_id IS NOT NULL
+    GROUP BY i.home_zone_id
+),
+zone_calc AS (
+    SELECT 
+        z.id AS zone_id,
+        COALESCE(zo.online_count, 0) AS online_instructors,
+        COALESCE(zb.busy_count, 0) AS busy_instructors
+    FROM geo_zones z
+    LEFT JOIN zone_online zo ON z.id = zo.zone_id
+    LEFT JOIN zone_busy zb ON z.id = zb.zone_id
+)
+
+INSERT INTO instructor_zone_supply_projection (
+    zone_id,
+    online_instructors,
+    busy_instructors,
+    available_instructors,
+    supply_ratio,
+    drain_risk_score,
+    updated_at
+)
+SELECT
+    zone_id,
+    online_instructors,
+    busy_instructors,
+    GREATEST(online_instructors - busy_instructors, 0),
+
+    CASE 
+        WHEN online_instructors = 0 THEN 0
+        ELSE ROUND(
+            (GREATEST(online_instructors - busy_instructors, 0)::numeric 
+             / online_instructors::numeric),
+            4
+        )
+    END,
+
+    CASE 
+        WHEN online_instructors = 0 THEN 0
+        ELSE ROUND(
+            1 - (
+                GREATEST(online_instructors - busy_instructors, 0)::numeric
+                / online_instructors::numeric
+            ),
+            4
+        )
+    END,
+
+    NOW()
+
+FROM zone_calc
+ON CONFLICT (zone_id)
+DO UPDATE SET
+    online_instructors = EXCLUDED.online_instructors,
+    busy_instructors = EXCLUDED.busy_instructors,
+    available_instructors = EXCLUDED.available_instructors,
+    supply_ratio = EXCLUDED.supply_ratio,
+    drain_risk_score = EXCLUDED.drain_risk_score,
+    updated_at = NOW();
+`);
+
     }
 
     await client.query("COMMIT");
