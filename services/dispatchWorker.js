@@ -215,21 +215,32 @@ WHERE online.instructor_id <> ALL($1::uuid[])
 AND COALESCE(capacity.active_offers, 0) < $3
 
 ORDER BY
-   (
-  COALESCE(s.economic_score, 0)
+  (
+    COALESCE(s.economic_score, 0)
 
-  + CASE
-      WHEN i.home_zone_id = $4 THEN 0.20
-      ELSE 0
-    END
+    -- Home zone base bonus
+    + CASE
+        WHEN i.home_zone_id = $4 THEN 0.20
+        ELSE 0
+      END
 
-  - COALESCE(zdm.penalty_score, 0)
+    -- 🔥 Zone Recovery Boost
+    + CASE
+        WHEN i.home_zone_id = $4
+        THEN COALESCE(izsp.drain_risk_score, 0) * 0.20
+        ELSE 0
+      END
 
-  - CASE
-      WHEN i.home_zone_id = $4 THEN 0
-      ELSE COALESCE(izsp.drain_risk_score, 0) * 0.15
-    END
-)
+    -- Distance penalty
+    - COALESCE(zdm.penalty_score, 0)
+
+    -- Drain penalty (only when leaving home zone)
+    - CASE
+        WHEN i.home_zone_id = $4 THEN 0
+        ELSE COALESCE(izsp.drain_risk_score, 0) * 0.15
+      END
+  )
+ DESC,
   DESC,
 
   COALESCE(s.offers_last_24h, 0) ASC,
