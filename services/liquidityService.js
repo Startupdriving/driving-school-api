@@ -170,6 +170,58 @@ export async function rebuildLiquidity() {
           updated_at = NOW();
     `);
 
+    // 🔥 Rebuild zone_pricing_projection (SURGE LAYER)
+
+await client.query(`
+WITH zone_supply AS (
+    SELECT
+        zone_id,
+        supply_ratio,
+        drain_risk_score
+    FROM instructor_zone_supply_projection
+)
+
+INSERT INTO zone_pricing_projection (
+    zone_id,
+    supply_ratio,
+    drain_risk_score,
+    surge_multiplier,
+    reason_code,
+    updated_at
+)
+
+SELECT
+    zone_id,
+    supply_ratio,
+    drain_risk_score,
+
+    CASE
+        WHEN supply_ratio < 0.15 THEN 1.40
+        WHEN supply_ratio < 0.30 THEN 1.25
+        WHEN supply_ratio < 0.50 THEN 1.10
+        ELSE 1.00
+    END AS surge_multiplier,
+
+    CASE
+        WHEN supply_ratio < 0.15 THEN 'critical_supply'
+        WHEN supply_ratio < 0.30 THEN 'tight_supply'
+        WHEN supply_ratio < 0.50 THEN 'low_supply'
+        ELSE 'normal'
+    END AS reason_code,
+
+    NOW()
+
+FROM zone_supply
+
+ON CONFLICT (zone_id)
+DO UPDATE SET
+    supply_ratio = EXCLUDED.supply_ratio,
+    drain_risk_score = EXCLUDED.drain_risk_score,
+    surge_multiplier = EXCLUDED.surge_multiplier,
+    reason_code = EXCLUDED.reason_code,
+    updated_at = NOW();
+`);
+
     await client.query("COMMIT");
 
   } catch (err) {
