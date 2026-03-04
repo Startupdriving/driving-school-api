@@ -377,12 +377,38 @@ await client.query(
   ]
 );
 
+
+// 🔹 Fetch zone_id from lesson request
+const { rows: zoneRows } = await client.query(`
+  SELECT (payload->>'zone_id')::int AS zone_id
+  FROM event
+  WHERE identity_id = $1
+  AND event_type = 'lesson_requested'
+  LIMIT 1
+`, [requestId]);
+
+const zoneId = zoneRows.length > 0 ? zoneRows[0].zone_id : null;
+
+let surgeMultiplier = 1;
+
+if (zoneId) {
+  const { rows: surgeRows } = await client.query(`
+    SELECT surge_multiplier
+    FROM zone_pricing_projection
+    WHERE zone_id = $1
+  `, [zoneId]);
+
+  surgeMultiplier = surgeRows.length > 0
+    ? parseFloat(surgeRows[0].surge_multiplier)
+    : 1;
+}
 // ============================
 // FINANCIAL ENGINE START
 // ============================
 
 // 1️⃣ Fixed lesson price (later dynamic)
-const lessonPrice = 2000; // PKR
+const basePrice = 2000; // PKR base price
+const lessonPrice = Math.round(basePrice * surgeMultiplier);
 
 // Insert lesson_price_calculated under lesson identity
 await client.query(
@@ -431,10 +457,11 @@ await client.query(
     generateUUID(),
     paymentId,
     JSON.stringify({
-      lesson_id: lessonId,
-      amount: lessonPrice,
-      currency: "PKR"
-    })
+  base_price: basePrice,
+  surge_multiplier: surgeMultiplier,
+  final_price: lessonPrice,
+  currency: "PKR"
+})
   ]
 );
 
