@@ -196,18 +196,20 @@ SELECT
     drain_risk_score,
 
     CASE
-        WHEN supply_ratio < 0.15 THEN 1.40
-        WHEN supply_ratio < 0.30 THEN 1.25
-        WHEN supply_ratio < 0.50 THEN 1.10
-        ELSE 1.00
-    END AS surge_multiplier,
+    WHEN supply_ratio = 0 THEN 1.00
+    WHEN supply_ratio < 0.15 THEN 1.40
+    WHEN supply_ratio < 0.30 THEN 1.25
+    WHEN supply_ratio < 0.50 THEN 1.10
+    ELSE 1.00
+END AS surge_multiplier,
 
     CASE
-        WHEN supply_ratio < 0.15 THEN 'critical_supply'
-        WHEN supply_ratio < 0.30 THEN 'tight_supply'
-        WHEN supply_ratio < 0.50 THEN 'low_supply'
-        ELSE 'normal'
-    END AS reason_code,
+    WHEN supply_ratio = 0 THEN 'no_supply'
+    WHEN supply_ratio < 0.15 THEN 'critical_supply'
+    WHEN supply_ratio < 0.30 THEN 'tight_supply'
+    WHEN supply_ratio < 0.50 THEN 'low_supply'
+    ELSE 'normal'
+END AS reason_code,
 
     NOW()
 
