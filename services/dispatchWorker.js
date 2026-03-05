@@ -1,4 +1,5 @@
 import pool from "../db.js";
+import { resolveZone } from "./zoneResolver.js";
 import { v4 as uuidv4 } from "uuid";
 
 const MAX_ACTIVE_OFFERS_PER_INSTRUCTOR = 3;
@@ -193,7 +194,10 @@ const requestZoneId =
 `
 SELECT
   online.instructor_id
-FROM current_online_instructors online
+COALESCE(icz.zone_id, i.home_zone_id) AS instructor_zone
+
+LEFT JOIN instructor_current_zone icz
+  ON icz.instructor_id = online.instructor_id
 
 LEFT JOIN identity i
   ON online.instructor_id = i.id
@@ -202,7 +206,7 @@ LEFT JOIN instructor_scoring s
   ON online.instructor_id = s.instructor_id
 
 LEFT JOIN zone_distance_matrix zdm
-  ON zdm.from_zone_id = i.home_zone_id
+  ON zdm.from_zone_id = COALESCE(icz.zone_id, i.home_zone_id)
   AND zdm.to_zone_id = $4
 
 LEFT JOIN instructor_zone_supply_projection izsp
