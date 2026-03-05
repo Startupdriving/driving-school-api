@@ -1,4 +1,4 @@
-CREATE TABLE zone_travel_time_matrix (
+CREATE TABLE IF NOT EXISTS zone_travel_time_matrix (
 
   from_zone_id INT NOT NULL,
   to_zone_id INT NOT NULL,
@@ -24,4 +24,5 @@ SELECT
     ELSE 20
   END
 FROM geo_zones a
-CROSS JOIN geo_zones b;
+CROSS JOIN geo_zones b
+ON CONFLICT (from_zone_id, to_zone_id) DO NOTHING;
