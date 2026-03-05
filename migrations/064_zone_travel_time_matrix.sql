@@ -1,19 +1,17 @@
+-- ensure table exists
 CREATE TABLE IF NOT EXISTS zone_travel_time_matrix (
-
   from_zone_id INT NOT NULL,
   to_zone_id INT NOT NULL,
-
-  estimated_minutes NUMERIC(5,2) NOT NULL,
-
+  estimated_minutes NUMERIC(5,2),
   updated_at TIMESTAMPTZ DEFAULT NOW(),
-
-  PRIMARY KEY (from_zone_id, to_zone_id),
-
-  FOREIGN KEY (from_zone_id) REFERENCES geo_zones(id),
-  FOREIGN KEY (to_zone_id) REFERENCES geo_zones(id)
-
+  PRIMARY KEY (from_zone_id, to_zone_id)
 );
 
+-- ensure column exists
+ALTER TABLE zone_travel_time_matrix
+ADD COLUMN IF NOT EXISTS estimated_minutes NUMERIC(5,2);
+
+-- seed travel times
 INSERT INTO zone_travel_time_matrix
 (from_zone_id, to_zone_id, estimated_minutes)
 SELECT
@@ -25,4 +23,5 @@ SELECT
   END
 FROM geo_zones a
 CROSS JOIN geo_zones b
-ON CONFLICT (from_zone_id, to_zone_id) DO NOTHING;
+ON CONFLICT (from_zone_id, to_zone_id) DO UPDATE
+SET estimated_minutes = EXCLUDED.estimated_minutes;
