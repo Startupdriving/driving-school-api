@@ -313,6 +313,21 @@ LIMIT $2
       instructorId,
       JSON.stringify({ wave })
     ]);
+  
+   await client.query(`
+  INSERT INTO instructor_pending_offers (
+    offer_id,
+    instructor_id,
+    lesson_request_id,
+    created_at,
+    expires_at
+  )
+  VALUES ($1, $2, $3, NOW(), NOW() + INTERVAL '20 seconds')
+`, [
+  uuidv4(),
+  instructorId,
+  requestId
+]);
 
     await client.query(`
       INSERT INTO instructor_offer_stats (

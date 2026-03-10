@@ -84,3 +84,31 @@ router.get('/stats/students', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+
+router.get("/instructor/offers", async (req, res) => {
+  const { instructor_id } = req.query;
+
+  const client = await pool.connect();
+
+  try {
+
+    const { rows } = await client.query(`
+      SELECT *
+      FROM instructor_pending_offers
+      WHERE instructor_id = $1
+      ORDER BY created_at ASC
+    `, [instructor_id]);
+
+    res.json(rows);
+
+  } catch (err) {
+
+    res.status(500).json({ error: err.message });
+
+  } finally {
+
+    client.release();
+
+  }
+});
