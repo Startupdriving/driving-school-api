@@ -76,24 +76,23 @@ const zoneId = zoneRows.length > 0
   : null;
 
       // 1️⃣ Insert lesson_requested event
-await client.query(
-  `
-  INSERT INTO event (
-    id,
-    identity_id,
-    event_type,
-    payload,
-    lesson_range
-  )
-  VALUES (
-    $1,
-    $1,
-    'lesson_requested',
-    $2,
-    tstzrange($3::timestamptz, $4::timestamptz)
-  )
-  `,
-   [
+console.log("INSERT lesson_requested event");
+
+      await client.query(
+  `INSERT INTO event (
+     id,
+     identity_id,
+     event_type,
+     payload
+   )
+   VALUES (
+     $1,
+     $2,
+     'lesson_requested',
+     $3
+   )`,
+  [
+    uuidv4(),
     requestId,
     JSON.stringify({
       student_id,
@@ -102,11 +101,10 @@ await client.query(
       pickup_lat,
       pickup_lng,
       zone_id: zoneId
-    }),
-    requested_start_time,
-    requested_end_time
+    })
   ]
 );
+
       await sendNextWaveOffers(client, requestId, 1);
 
 
@@ -120,6 +118,7 @@ await client.query(
     res.status(201).json(response);
 
   } catch (err) {
+console.error("FULL ERROR:", err);
     res.status(400).json({ error: err.message });
   }
 }

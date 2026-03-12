@@ -87,6 +87,7 @@ router.get('/stats/students', async (req, res) => {
 
 
 router.get("/instructor/offers", async (req, res) => {
+
   const { instructor_id } = req.query;
 
   const client = await pool.connect();
@@ -94,7 +95,12 @@ router.get("/instructor/offers", async (req, res) => {
   try {
 
     const { rows } = await client.query(`
-      SELECT *
+      SELECT
+        offer_id,
+        lesson_request_id,
+        instructor_id,
+        expires_at,
+        created_at
       FROM instructor_pending_offers
       WHERE instructor_id = $1
       ORDER BY created_at ASC
@@ -104,11 +110,16 @@ router.get("/instructor/offers", async (req, res) => {
 
   } catch (err) {
 
-    res.status(500).json({ error: err.message });
+    console.error(err);
+
+    res.status(500).json({
+      error: "failed_to_fetch_offers"
+    });
 
   } finally {
 
     client.release();
 
   }
+
 });
