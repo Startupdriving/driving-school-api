@@ -1,3 +1,4 @@
+import { rebuildProjections } from "../services/projectionRebuildService.js";
 import { getInstructorDailySchedule } from "../services/instructorService.js";
 import express from "express";
 import pool from "../db.js";
@@ -355,6 +356,55 @@ router.get("/instructor-dashboard", async (req, res) => {
 
     console.error(err);
     res.status(500).json({ error: "dashboard_query_failed" });
+
+  }
+
+});
+
+router.post("/admin/rebuild-projections", async (req,res)=>{
+
+  try {
+
+    await rebuildProjections();
+
+    res.json({
+      status: "rebuild_complete"
+    });
+
+  } catch(err) {
+
+    console.error(err);
+
+    res.status(500).json({
+      error: "rebuild_failed"
+    });
+
+  }
+});
+
+router.get("/event-stream", async (req, res) => {
+
+  const { identity_id } = req.query;
+
+  if (!identity_id) {
+    return res.status(400).json({ error: "identity_id required" });
+  }
+
+  try {
+
+    const result = await pool.query(`
+      SELECT *
+      FROM event_stream_view
+      WHERE identity_id = $1
+      ORDER BY created_at ASC
+    `, [identity_id]);
+
+    res.json(result.rows);
+
+  } catch (err) {
+
+    console.error(err);
+    res.status(500).json({ error: "event_stream_query_failed" });
 
   }
 
