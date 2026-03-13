@@ -21,7 +21,6 @@ router.get("/students/active", async (req, res) => {
   }
 });
 
-export default router;
 
 // GET active instructors
 router.get('/instructors/active', async (req, res) => {
@@ -123,3 +122,242 @@ router.get("/instructor/offers", async (req, res) => {
   }
 
 });
+
+router.get("/lesson-status", async (req,res) => {
+
+  const { lesson_id } = req.query;
+
+  const { rows } = await pool.query(`
+    SELECT *
+    FROM lesson_status_projection
+    WHERE lesson_id = $1
+  `,[lesson_id]);
+
+  res.json(rows[0] || null);
+
+});
+
+router.get("/student-active-lesson", async (req,res)=>{
+
+  const { student_id } = req.query;
+
+  const { rows } = await pool.query(`
+    SELECT *
+    FROM student_active_lesson_projection
+    WHERE student_id = $1
+  `,[student_id]);
+
+  res.json(rows[0] || null);
+
+});
+
+router.get("/instructor-active-lesson", async (req, res) => {
+
+  const { instructor_id } = req.query;
+
+  if (!instructor_id) {
+    return res.status(400).json({ error: "instructor_id required" });
+  }
+
+  try {
+
+    const { rows } = await pool.query(`
+      SELECT *
+      FROM instructor_active_lesson_projection
+      WHERE instructor_id = $1
+    `, [instructor_id]);
+
+    res.json(rows);
+
+  } catch (err) {
+
+    console.error(err);
+    res.status(500).json({ error: "query_failed" });
+
+  }
+
+});
+
+router.get("/student-upcoming-lessons", async (req, res) => {
+
+  const { student_id } = req.query;
+
+  if (!student_id) {
+    return res.status(400).json({ error: "student_id required" });
+  }
+
+  try {
+
+    const { rows } = await pool.query(`
+      SELECT *
+      FROM student_upcoming_lessons_projection
+      WHERE student_id = $1
+      ORDER BY start_time
+      LIMIT 5
+    `, [student_id]);
+
+    res.json(rows);
+
+  } catch (err) {
+
+    console.error(err);
+    res.status(500).json({ error: "query_failed" });
+
+  }
+
+});
+
+router.get("/student-dashboard", async (req, res) => {
+
+  const { student_id } = req.query;
+
+  if (!student_id) {
+    return res.status(400).json({ error: "student_id required" });
+  }
+
+  try {
+
+    const activeLesson = await pool.query(`
+      SELECT *
+      FROM student_active_lesson_projection
+      WHERE student_id = $1
+    `, [student_id]);
+
+    const upcomingLessons = await pool.query(`
+      SELECT *
+      FROM student_upcoming_lessons_projection
+      WHERE student_id = $1
+      ORDER BY start_time
+      LIMIT 5
+    `, [student_id]);
+
+    const instructorZones = await pool.query(`
+      SELECT
+  icz.instructor_id,
+  icz.zone_id,
+  z.zone_name
+FROM instructor_current_zone icz
+JOIN geo_zones z
+ON icz.zone_id = z.id
+    `);
+
+    res.json({
+      active_lesson: activeLesson.rows[0] || null,
+      upcoming_lessons: upcomingLessons.rows,
+      instructor_locations: instructorZones.rows
+    });
+
+  } catch (err) {
+
+    console.error(err);
+    res.status(500).json({ error: "dashboard_query_failed" });
+
+  }
+
+});
+
+
+router.get("/lesson-timeline", async (req, res) => {
+
+  const { lesson_request_id } = req.query;
+
+  if (!lesson_request_id) {
+    return res.status(400).json({ error: "lesson_request_id required" });
+  }
+
+  try {
+
+    const result = await pool.query(`
+      SELECT *
+      FROM lesson_timeline_projection
+      WHERE lesson_request_id = $1
+    `, [lesson_request_id]);
+
+    res.json(result.rows[0] || null);
+
+  } catch (err) {
+
+    console.error(err);
+    res.status(500).json({ error: "timeline_query_failed" });
+
+  }
+
+});
+
+router.get("/instructor-earnings", async (req, res) => {
+
+  const { instructor_id } = req.query;
+
+  if (!instructor_id) {
+    return res.status(400).json({ error: "instructor_id required" });
+  }
+
+  try {
+
+    const result = await pool.query(`
+      SELECT *
+      FROM instructor_earnings_projection
+      WHERE instructor_id = $1
+    `, [instructor_id]);
+
+    res.json(result.rows[0] || null);
+
+  } catch (err) {
+
+    console.error(err);
+    res.status(500).json({ error: "earnings_query_failed" });
+
+  }
+
+});
+
+router.get("/marketplace-live-state", async (req, res) => {
+
+  try {
+
+    const result = await pool.query(`
+      SELECT *
+      FROM marketplace_live_state_projection
+    `);
+
+    res.json(result.rows[0]);
+
+  } catch (err) {
+
+    console.error(err);
+    res.status(500).json({ error: "marketplace_state_query_failed" });
+
+  }
+
+});
+
+console.log("Instructor dashboard route loaded");
+
+router.get("/instructor-dashboard", async (req, res) => {
+
+  const { instructor_id } = req.query;
+
+  if (!instructor_id) {
+    return res.status(400).json({ error: "instructor_id required" });
+  }
+
+  try {
+
+    const result = await pool.query(`
+      SELECT *
+      FROM instructor_dashboard_projection
+      WHERE instructor_id = $1
+    `, [instructor_id]);
+
+    res.json(result.rows[0] || null);
+
+  } catch (err) {
+
+    console.error(err);
+    res.status(500).json({ error: "dashboard_query_failed" });
+
+  }
+
+});
+
+export default router;

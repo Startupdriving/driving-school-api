@@ -36,6 +36,7 @@ app.use("/write/lesson", lessonRoutes);
 app.use("/write/lesson-request", lessonRequestRoutes);
 app.use("/write/payment", paymentRoutes);
 
+
 const PORT = process.env.PORT || 5173;
 
 // Run migrations first

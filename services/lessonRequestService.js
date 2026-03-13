@@ -328,15 +328,28 @@ await client.query(
 );
 
       // Create lesson identity
-      const lessonId = generateUUID();
+      const lessonId = uuidv4();
 
-      await client.query(
-        `
-        INSERT INTO identity (id, identity_type)
-        VALUES ($1, 'lesson')
-        `,
-        [lessonId]
-      );
+await client.query(`
+INSERT INTO identity(id, identity_type)
+VALUES ($1,'lesson')
+`, [lessonId]);
+
+await client.query(`
+INSERT INTO event (
+  id,
+  identity_id,
+  event_type,
+  instructor_id,
+  payload
+)
+VALUES ($1,$2,'lesson_created',$3,$4)
+`, [
+  uuidv4(),
+  lessonId,
+  instructorId,
+  JSON.stringify({ lesson_request_id: requestId })
+]);
 
       // Insert lesson_scheduled
 await client.query(
