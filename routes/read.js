@@ -562,4 +562,24 @@ router.get("/admin/liquidity-pressure", async (req, res) => {
 
 });
 
+router.get("/admin/recent-activity", async (req, res) => {
+
+  try {
+
+    const result = await pool.query(`
+      SELECT *
+      FROM recent_activity_projection
+    `);
+
+    res.json(result.rows);
+
+  } catch (err) {
+
+    console.error(err);
+    res.status(500).json({ error: "recent_activity_query_failed" });
+
+  }
+
+});
+
 export default router;
