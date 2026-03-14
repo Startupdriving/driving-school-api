@@ -410,4 +410,156 @@ router.get("/event-stream", async (req, res) => {
 
 });
 
+router.get("/event-audit", async (req,res)=>{
+
+  try {
+
+    const result = await pool.query(`
+      SELECT *
+      FROM event_audit_violations
+      ORDER BY identity_id
+      LIMIT 100
+    `);
+
+    res.json(result.rows);
+
+  } catch(err){
+
+    console.error(err);
+    res.status(500).json({error:"audit_query_failed"});
+
+  }
+
+});
+
+router.get("/dispatch-observability", async (req, res) => {
+
+  const { lesson_request_id } = req.query;
+
+  try {
+
+    const result = await pool.query(`
+      SELECT *
+      FROM dispatch_observability_projection
+      WHERE lesson_request_id = $1
+      ORDER BY offer_created_at ASC
+    `, [lesson_request_id]);
+
+    res.json(result.rows);
+
+  } catch (err) {
+
+    console.error(err);
+    res.status(500).json({ error: "dispatch_observability_failed" });
+
+  }
+
+});
+
+import { simulateDispatchRequests } from "../services/dispatchSimulationService.js";
+
+router.post("/admin/simulate-dispatch", async (req, res) => {
+
+  const { request_count, zone_id } = req.body;
+
+  if (!request_count || !zone_id) {
+    return res.status(400).json({
+      error: "request_count and zone_id required"
+    });
+  }
+
+  try {
+
+    const result = await simulateDispatchRequests(
+      request_count,
+      zone_id
+    );
+
+    res.json({
+      created_requests: result
+    });
+
+  } catch (err) {
+
+    console.error(err);
+
+    res.status(500).json({
+      error: "dispatch_simulation_failed"
+    });
+
+  }
+
+});
+
+router.get("/admin/system-health", async (req, res) => {
+
+  try {
+
+    const result = await pool.query(`
+      SELECT
+        active_lesson_requests,
+        active_lessons,
+        upcoming_lessons,
+        online_instructors,
+        pending_offers,
+        snapshot_time
+      FROM marketplace_live_state_projection
+    `);
+
+    res.json(result.rows[0]);
+
+  } catch (err) {
+
+    console.error(err);
+    res.status(500).json({ error: "system_health_query_failed" });
+
+  }
+
+});
+
+router.get("/admin/dispatch-metrics", async (req, res) => {
+
+  try {
+
+    const result = await pool.query(`
+      SELECT
+        COUNT(*) FILTER (WHERE event_type='lesson_offer_sent') AS offers_sent,
+        COUNT(*) FILTER (WHERE event_type='lesson_offer_accepted') AS offers_accepted,
+        COUNT(DISTINCT instructor_id) FILTER (WHERE event_type='lesson_offer_sent') AS instructors_participating
+      FROM event
+      WHERE created_at > NOW() - INTERVAL '1 hour'
+    `);
+
+    res.json(result.rows[0]);
+
+  } catch (err) {
+
+    console.error(err);
+    res.status(500).json({ error: "dispatch_metrics_query_failed" });
+
+  }
+
+});
+
+router.get("/admin/liquidity-pressure", async (req, res) => {
+
+  try {
+
+    const result = await pool.query(`
+      SELECT *
+      FROM zone_liquidity_pressure
+      ORDER BY zone_id
+    `);
+
+    res.json(result.rows);
+
+  } catch (err) {
+
+    console.error(err);
+    res.status(500).json({ error: "liquidity_query_failed" });
+
+  }
+
+});
+
 export default router;
