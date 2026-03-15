@@ -2,6 +2,7 @@ import { rebuildProjections } from "../services/projectionRebuildService.js";
 import { getInstructorDailySchedule } from "../services/instructorService.js";
 import express from "express";
 import pool from "../db.js";
+import crypto from "crypto"
 
 const router = express.Router();
 
@@ -361,54 +362,56 @@ router.get("/instructor-dashboard", async (req, res) => {
 
 });
 
-router.post("/admin/rebuild-projections", async (req,res)=>{
+router.post("/admin/rebuild-projections", async (req, res) => {
 
   try {
 
-    await rebuildProjections();
+    console.log("PROJECTION REBUILD STARTED")
+
+    await rebuildProjections()
 
     res.json({
-      status: "rebuild_complete"
-    });
-
-  } catch(err) {
-
-    console.error(err);
-
-    res.status(500).json({
-      error: "rebuild_failed"
-    });
-
-  }
-});
-
-router.get("/event-stream", async (req, res) => {
-
-  const { identity_id } = req.query;
-
-  if (!identity_id) {
-    return res.status(400).json({ error: "identity_id required" });
-  }
-
-  try {
-
-    const result = await pool.query(`
-      SELECT *
-      FROM event_stream_view
-      WHERE identity_id = $1
-      ORDER BY created_at ASC
-    `, [identity_id]);
-
-    res.json(result.rows);
+      status: "rebuild_started"
+    })
 
   } catch (err) {
 
-    console.error(err);
-    res.status(500).json({ error: "event_stream_query_failed" });
+    console.error("projection rebuild error:", err)
+
+    res.status(500).json({
+      error: "projection_rebuild_failed"
+    })
 
   }
 
-});
+})
+
+router.get("/event-stream", async (req, res) => {
+
+  try {
+
+    const id = req.query.identity_id
+
+    const result = await pool.query(`
+      SELECT
+        event_type,
+        payload,
+        created_at
+      FROM event
+      WHERE identity_id = $1
+      ORDER BY created_at ASC
+    `, [id])
+
+    res.json(result.rows)
+
+  } catch (err) {
+
+    console.error("event stream error:", err)
+    res.status(500).json({ error: "event_stream_failed" })
+
+  }
+
+})
 
 router.get("/event-audit", async (req,res)=>{
 
@@ -434,62 +437,106 @@ router.get("/event-audit", async (req,res)=>{
 
 router.get("/dispatch-observability", async (req, res) => {
 
-  const { lesson_request_id } = req.query;
-
   try {
 
+    const lessonId = req.query.lesson_request_id
+
     const result = await pool.query(`
-      SELECT *
+      SELECT
+        instructor_id,
+        economic_score,
+        wave,
+        instructor_zone,
+        request_zone,
+        offer_created_at
       FROM dispatch_observability_projection
       WHERE lesson_request_id = $1
-      ORDER BY offer_created_at ASC
-    `, [lesson_request_id]);
+      ORDER BY wave
+    `, [lessonId])
 
-    res.json(result.rows);
+    res.json(result.rows)
 
   } catch (err) {
 
-    console.error(err);
-    res.status(500).json({ error: "dispatch_observability_failed" });
+    console.error("dispatch observability error:", err)
+    res.status(500).json({ error: "dispatch_observability_failed" })
 
   }
 
-});
+})
 
 import { simulateDispatchRequests } from "../services/dispatchSimulationService.js";
 
 router.post("/admin/simulate-dispatch", async (req, res) => {
 
-  const { request_count, zone_id } = req.body;
-
-  if (!request_count || !zone_id) {
-    return res.status(400).json({
-      error: "request_count and zone_id required"
-    });
-  }
-
   try {
 
-    const result = await simulateDispatchRequests(
-      request_count,
-      zone_id
-    );
+    console.log("SIMULATION ROUTE HIT")
+
+    const lessonId = crypto.randomUUID()
+
+    const now = new Date()
+
+    const client = await pool.connect()
+
+    try {
+
+      await client.query("BEGIN")
+
+      // create identity
+      await client.query(`
+        INSERT INTO identity (id, identity_type, created_at)
+        VALUES ($1, 'lesson_request', $2)
+      `, [lessonId, now])
+
+      // create event
+      await client.query(`
+        INSERT INTO event (
+          id,
+          identity_id,
+          event_type,
+          payload,
+          created_at
+        )
+        VALUES ($1,$1,'lesson_requested',$2,$3)
+      `, [
+        lessonId,
+        JSON.stringify({
+          zone_id: req.body.zone_id ?? 1,
+          requested_start_time: req.body.requested_start_time ?? now
+        }),
+        now
+      ])
+
+      await client.query("COMMIT")
+
+    } catch (err) {
+
+      await client.query("ROLLBACK")
+      throw err
+
+    } finally {
+
+      client.release()
+
+    }
 
     res.json({
-      created_requests: result
-    });
+      lesson_request_id: lessonId,
+      status: "simulation_started"
+    })
 
   } catch (err) {
 
-    console.error(err);
+    console.error("simulate dispatch error:", err)
 
     res.status(500).json({
-      error: "dispatch_simulation_failed"
-    });
+      error: "simulation_failed"
+    })
 
   }
 
-});
+})
 
 router.get("/admin/system-health", async (req, res) => {
 
@@ -563,23 +610,24 @@ router.get("/admin/liquidity-pressure", async (req, res) => {
 });
 
 router.get("/admin/recent-activity", async (req, res) => {
-
   try {
 
     const result = await pool.query(`
-      SELECT *
-      FROM recent_activity_projection
-    `);
+      SELECT
+        event_type,
+        identity_id,
+        created_at
+      FROM event
+      ORDER BY created_at DESC
+      LIMIT 20
+    `)
 
-    res.json(result.rows);
+    res.json(result.rows)
 
   } catch (err) {
-
-    console.error(err);
-    res.status(500).json({ error: "recent_activity_query_failed" });
-
+    console.error("recent activity error:", err)
+    res.status(500).json({ error: "recent_activity_failed" })
   }
-
-});
+})
 
 export default router;
