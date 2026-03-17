@@ -630,4 +630,153 @@ router.get("/admin/recent-activity", async (req, res) => {
   }
 })
 
+router.get("/admin/instructor-locations", async (req, res) => {
+
+  try {
+
+    const result = await pool.query(`
+      SELECT
+        instructor_id,
+        lat,
+        lng,
+        zone_id
+      FROM instructor_location_projection
+    `)
+
+    res.json(result.rows)
+
+  } catch (err) {
+
+    console.error("instructor locations error:", err)
+
+    res.status(500).json({
+      error: "instructor_locations_failed"
+    })
+
+  }
+
+})
+
+router.get("/admin/active-lessons-map", async (req, res) => {
+
+  try {
+
+    const result = await pool.query(`
+      SELECT
+        lesson_id,
+        student_lat,
+        student_lng,
+        instructor_lat,
+        instructor_lng
+      FROM active_lessons_map_projection
+    `)
+
+    res.json(result.rows)
+
+  } catch (err) {
+
+    console.error("active lessons map error:", err)
+
+    res.status(500).json({
+      error: "active_lessons_map_failed"
+    })
+
+  }
+
+})
+
+router.get("/admin/liquidity-risk", async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT zone_id, recent_requests_5m, online_instructors
+      FROM zone_liquidity_pressure
+    `);
+
+    const risk = rows.map(z => ({
+      zone_id: z.zone_id,
+      risk_score: Number(z.recent_requests_5m) / (Number(z.online_instructors) + 1)
+    }));
+
+    res.json(risk);
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "liquidity_risk_failed" });
+  }
+});
+
+router.get("/admin/instructor-drift", async (req, res) => {
+
+  try {
+
+    const instructors = await pool.query(`
+      SELECT instructor_id, lat, lng
+      FROM instructor_location_projection
+    `)
+
+    const zones = await pool.query(`
+      SELECT zone_id, recent_requests_5m
+      FROM zone_liquidity_pressure
+    `)
+
+    const zoneCoordinates = {
+      1: [31.5204, 74.3587],
+      2: [31.5000, 74.3500],
+      3: [31.5400, 74.3700],
+      4: [31.5300, 74.3300],
+      5: [31.5100, 74.3800],
+      6: [31.4900, 74.3600],
+      7: [31.5600, 74.3400],
+      8: [31.5200, 74.3900]
+    }
+
+    const drift = instructors.rows.map(inst => {
+
+      let bestZone = null
+      let bestScore = -Infinity
+
+      zones.rows.forEach(zone => {
+
+        const coords = zoneCoordinates[zone.zone_id]
+        if (!coords) return
+
+        const dx = coords[0] - inst.lat
+        const dy = coords[1] - inst.lng
+
+        const distance = Math.sqrt(dx * dx + dy * dy) + 0.001
+        const demand = Number(zone.recent_requests_5m)
+
+        const score = demand / distance
+
+        if (score > bestScore) {
+          bestScore = score
+          bestZone = zone.zone_id
+        }
+
+      })
+
+      return {
+        instructor_id: inst.instructor_id,
+        from_lat: Number(inst.lat),
+        from_lng: Number(inst.lng),
+        to_zone: bestZone,
+        to_coords: zoneCoordinates[bestZone]
+      }
+
+    })
+
+    res.json(drift) // ✅ IMPORTANT
+
+  } catch (err) {
+
+    console.error("drift error:", err)
+
+    res.status(500).json({
+      error: "drift_failed"
+    })
+
+  }
+
+})
+
 export default router;
