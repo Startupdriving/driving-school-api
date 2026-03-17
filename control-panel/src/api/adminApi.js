@@ -35,3 +35,4 @@ export const simulateDispatch = (payload) => {
 export const rebuildProjections = () => {
   return api.post("/admin/rebuild-projections")
 }
+

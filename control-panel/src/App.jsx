@@ -1,7 +1,7 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom"
 
 import Layout from "./layout/Layout"
-
+import MarketplaceHeatmap from "./pages/MarketplaceHeatmap"
 import Dashboard from "./pages/Dashboard"
 import DispatchMonitor from "./pages/DispatchMonitor"
 import LiquidityMap from "./pages/LiquidityMap"
@@ -16,8 +16,9 @@ export default function App() {
     <BrowserRouter>
 
       <Routes>
-
+         
         <Route element={<Layout />}>
+          <Route path="/heatmap" element={<MarketplaceHeatmap />} />
 
           <Route path="/" element={<Dashboard />} />
 

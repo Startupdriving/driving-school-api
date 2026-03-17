@@ -19,6 +19,7 @@ export default function Sidebar() {
         <Link to="/lesson">Lesson Inspector</Link>
         <Link to="/simulation">Simulation</Link>
         <Link to="/maintenance">Projection Maintenance</Link>
+        <Link to="/heatmap">Marketplace Heatmap </Link>
 
       </nav>
 
