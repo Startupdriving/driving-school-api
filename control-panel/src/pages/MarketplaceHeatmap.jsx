@@ -116,7 +116,16 @@ function waveColor(wave) {
 }
 
 
-
+function isValidCoord(lat, lng) {
+  return (
+    lat !== null &&
+    lng !== null &&
+    lat !== undefined &&
+    lng !== undefined &&
+    !isNaN(lat) &&
+    !isNaN(lng)
+  );
+}
 /* ---------------------------------------------------
    ICONS
 --------------------------------------------------- */
@@ -167,13 +176,12 @@ export default function MarketplaceHeatmap() {
   const [replayIndex, setReplayIndex] = useState(0)
   const [replayRunning, setReplayRunning] = useState(false)
 
-  const [zones, setZones] = useState([])
-  const [instructors, setInstructors] = useState([])
-  const [activeLessons, setActiveLessons] = useState([])
-  const [dispatchWaves, setDispatchWaves] = useState([])
-  const [liquidityRisk, setLiquidityRisk] = useState([])
-  const [drift, setDrift] = useState([])
-
+ 
+   const loadReplay = async (lessonId) => {
+   const data = await getDispatchReplay(lessonId)
+   setReplayOffers(data)
+   setReplayIndex(0)
+   }
 
   /* ---------------------------------------------------
      ROUTE ANIMATION
@@ -306,99 +314,91 @@ export default function MarketplaceHeatmap() {
         {/* Instructor cars */}
         {safeArray(instructors).map((inst) => {
 
-          const prev = prevPositions.current[inst.instructor_id]
+  const lat = Number(inst.lat)
+  const lng = Number(inst.lng)
 
-          let rotation = 0
+  if (!isValidCoord(lat, lng)) return null
 
-          if (prev) {
-            rotation = calculateHeading(
-              prev.lat,
-              prev.lng,
-              inst.lat,
-              inst.lng
-            )
-          }
+  const prev = prevPositions.current[inst.instructor_id]
 
-          prevPositions.current[inst.instructor_id] = {
-            lat: inst.lat,
-            lng: inst.lng
-          }
+  let rotation = 0
 
-          return (
-            <Marker
-              key={inst.instructor_id}
-              position={[inst.lat, inst.lng]}
-              icon={carIcon}
-              rotationAngle={rotation}
-              rotationOrigin="center"
-            />
-          )
+  if (prev) {
+    rotation = calculateHeading(prev.lat, prev.lng, lat, lng)
+  }
 
-        })}
+  prevPositions.current[inst.instructor_id] = { lat, lng }
+
+  return (
+    <Marker
+      key={inst.instructor_id}
+      position={[lat, lng]}
+      icon={carIcon}
+      rotationAngle={rotation}
+      rotationOrigin="center"
+    />
+  )
+})}
+              
 
 
 
         {/* Lesson routes */}
-        {safeArray(activeLessons).map((lesson) => (
+        {safeArray(activeLessons).map((lesson) => {
 
-          <Polyline
-            key={lesson.lesson_id}
-            positions={[
-              [lesson.student_lat, lesson.student_lng],
-              [lesson.instructor_lat, lesson.instructor_lng]
-            ]}
-            pathOptions={{
-              color: "blue",
-              weight: 4
-            }}
-          />
+  const sLat = Number(lesson.student_lat)
+  const sLng = Number(lesson.student_lng)
+  const iLat = Number(lesson.instructor_lat)
+  const iLng = Number(lesson.instructor_lng)
 
-        ))}
+  if (
+    !isValidCoord(sLat, sLng) ||
+    !isValidCoord(iLat, iLng)
+  ) return null
 
-
-
-        {/* Animated route cars */}
-        {Object.entries(routeCars).map(([lessonId, car]) => (
-
-          <Marker
-            key={lessonId}
-            position={car.position}
-            icon={carIcon}
-          />
-
-        ))}
+  return (
+    <Polyline
+      key={lesson.lesson_id}
+      positions={[
+        [sLat, sLng],
+        [iLat, iLng]
+      ]}
+      pathOptions={{ color: "blue", weight: 4 }}
+    />
+  )
+})}
 
 
 
         {/* Dispatch waves */}
-        {safeArray(dispatchWaves).map((offer) => (
+        {/* Dispatch waves */}
+{safeArray(dispatchWaves).map((offer) => {
 
-          <CircleMarker
-            key={offer.instructor_id + "-" + offer.wave}
-            center={[
-              Number(offer.instructor_lat),
-              Number(offer.instructor_lng)
-            ]}
-            radius={10}
-            pathOptions={{
-              color: waveColor(offer.wave),
-              fillOpacity: 0.7
-            }}
-          >
+  const lat = Number(offer.instructor_lat)
+  const lng = Number(offer.instructor_lng)
 
-            <Popup>
+  if (!isValidCoord(lat, lng)) return null
 
-              Instructor: {offer.instructor_id}
-              <br />
-              Wave: {offer.wave}
-              <br />
-              Score: {offer.economic_score}
-
-            </Popup>
-
-          </CircleMarker>
-
-        ))}
+  return (
+    <CircleMarker
+      key={offer.instructor_id + "-" + offer.wave}
+      center={[lat, lng]}
+      radius={10}
+      pathOptions={{
+        color: waveColor(offer.wave),
+        fillOpacity: 0.7
+      }}
+    >
+      <Popup>
+        Instructor: {offer.instructor_id}
+        <br />
+        Wave: {offer.wave}
+        <br />
+        Score: {offer.economic_score}
+      </Popup>
+    </CircleMarker>
+  )
+})}
 
 
 
@@ -432,19 +432,16 @@ export default function MarketplaceHeatmap() {
 
       {safeArray(liquidityRisk).map((zone) => {
 
-        const coords = zoneCoordinates[zone.zone_id]
+  const coords = zoneCoordinates[zone.zone_id]
+  if (!coords) return null
 
-          if (!coords) return null
+  let color = "green"
+  if (zone.risk_score > 1.5) color = "orange"
+  if (zone.risk_score > 3) color = "red"
 
-            let color = "green"
-
-      if (zone.risk_score > 1.5) color = "orange"
-      if (zone.risk_score > 3) color = "red"
-
-     return (
-
-       <CircleMarker
-       key={"risk-" + zone.zone_id}
+  return (
+    <CircleMarker
+      key={"risk-" + zone.zone_id}
       center={coords}
       radius={20}
       pathOptions={{
@@ -452,48 +449,43 @@ export default function MarketplaceHeatmap() {
         fillOpacity: 0.4
       }}
     >
-
       <Popup>
-
         Zone {zone.zone_id}
-
         <br/>
-
         Demand: {zone.demand}
-
         <br/>
-
         Supply: {zone.supply}
-
         <br/>
-
         Risk Score: {zone.risk_score.toFixed(2)}
-
       </Popup>
-
     </CircleMarker>
-
   )
 
 })}
 
 
-{safeArray(drift).map((d) => (
+{safeArray(drift).map((d) => {
 
-  <Polyline
-    key={d.instructor_id}
-    positions={[
-      [d.from_lat, d.from_lng],
-      d.to_coords
-    ]}
-    pathOptions={{
-      color: "purple",
-      weight: 2,
-      dashArray: "5,5"
-    }}
-  />
+  if (
+    !isValidCoord(d.from_lat, d.from_lng) ||
+    !d.to_coords
+  ) return null
 
-))}
+  return (
+    <Polyline
+      key={d.instructor_id}
+      positions={[
+        [d.from_lat, d.from_lng],
+        d.to_coords
+      ]}
+      pathOptions={{
+        color: "purple",
+        weight: 2,
+        dashArray: "5,5"
+      }}
+    />
+  )
+})}
 
       </MapContainer>
 
