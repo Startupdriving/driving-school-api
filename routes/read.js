@@ -1,3 +1,4 @@
+import { simulateDispatchRequests } from "../services/dispatchSimulationService.js";
 import { rebuildProjections } from "../services/projectionRebuildService.js";
 import { getInstructorDailySchedule } from "../services/instructorService.js";
 import express from "express";
@@ -387,31 +388,44 @@ router.post("/admin/rebuild-projections", async (req, res) => {
 })
 
 router.get("/event-stream", async (req, res) => {
-
   try {
+    const id = req.query.identity_id;
 
-    const id = req.query.identity_id
+    let result;
 
-    const result = await pool.query(`
-      SELECT
-        event_type,
-        payload,
-        created_at
-      FROM event
-      WHERE identity_id = $1
-      ORDER BY created_at ASC
-    `, [id])
+    if (id) {
+      // ✅ SINGLE LESSON MODE (Inspector)
+      result = await pool.query(`
+        SELECT
+          event_type,
+          payload,
+          created_at,
+          identity_id
+        FROM event
+        WHERE identity_id = $1
+        ORDER BY created_at ASC
+      `, [id]);
+    } else {
+      // ✅ GLOBAL STREAM MODE (Dashboard)
+      result = await pool.query(`
+        SELECT
+          event_type,
+          payload,
+          created_at,
+          identity_id
+        FROM event
+        ORDER BY created_at DESC
+        LIMIT 100
+      `);
+    }
 
-    res.json(result.rows)
+    res.json(result.rows);
 
   } catch (err) {
-
-    console.error("event stream error:", err)
-    res.status(500).json({ error: "event_stream_failed" })
-
+    console.error("event stream error:", err);
+    res.status(500).json({ error: "event_stream_failed" });
   }
-
-})
+});
 
 router.get("/event-audit", async (req,res)=>{
 
@@ -465,78 +479,41 @@ router.get("/dispatch-observability", async (req, res) => {
 
 })
 
-import { simulateDispatchRequests } from "../services/dispatchSimulationService.js";
-
 router.post("/admin/simulate-dispatch", async (req, res) => {
 
   try {
 
-    console.log("SIMULATION ROUTE HIT")
+    console.log("SIMULATION ROUTE HIT");
 
-    const lessonId = crypto.randomUUID()
+    const { request_count, zone_id } = req.body;
 
-    const now = new Date()
+    console.log("📥 INPUT:", request_count, zone_id);
 
-    const client = await pool.connect()
+    const result = await simulateDispatchRequests(
+      request_count,
+      zone_id
+    );
 
-    try {
-
-      await client.query("BEGIN")
-
-      // create identity
-      await client.query(`
-        INSERT INTO identity (id, identity_type, created_at)
-        VALUES ($1, 'lesson_request', $2)
-      `, [lessonId, now])
-
-      // create event
-      await client.query(`
-        INSERT INTO event (
-          id,
-          identity_id,
-          event_type,
-          payload,
-          created_at
-        )
-        VALUES ($1,$1,'lesson_requested',$2,$3)
-      `, [
-        lessonId,
-        JSON.stringify({
-          zone_id: req.body.zone_id ?? 1,
-          requested_start_time: req.body.requested_start_time ?? now
-        }),
-        now
-      ])
-
-      await client.query("COMMIT")
-
-    } catch (err) {
-
-      await client.query("ROLLBACK")
-      throw err
-
-    } finally {
-
-      client.release()
-
-    }
+    console.log("✅ SIMULATION RESULT:", result);
 
     res.json({
-      lesson_request_id: lessonId,
+      lesson_request_id: result[0],
       status: "simulation_started"
-    })
+    });
 
   } catch (err) {
 
-    console.error("simulate dispatch error:", err)
+    console.error("❌ ROUTE ERROR:", err);
 
     res.status(500).json({
-      error: "simulation_failed"
-    })
+      error: "simulation_failed",
+      details: err.message
+    });
 
   }
 
-})
+});
+
 
 router.get("/admin/system-health", async (req, res) => {
 
@@ -630,32 +607,25 @@ router.get("/admin/recent-activity", async (req, res) => {
   }
 })
 
-router.get("/admin/instructor-locations", async (req, res) => {
-
+router.get("/instructor-locations", async (req, res) => {
   try {
 
-    const result = await pool.query(`
+    const { rows } = await pool.query(`
       SELECT
         instructor_id,
+        zone_id,
         lat,
-        lng,
-        zone_id
-      FROM instructor_location_projection
-    `)
+        lng
+      FROM instructor_current_zone
+    `);
 
-    res.json(result.rows)
+    res.json(rows);
 
   } catch (err) {
-
-    console.error("instructor locations error:", err)
-
-    res.status(500).json({
-      error: "instructor_locations_failed"
-    })
-
+    console.error("instructor-locations error:", err);
+    res.status(500).json({ error: "failed" });
   }
-
-})
+});
 
 router.get("/admin/active-lessons-map", async (req, res) => {
 

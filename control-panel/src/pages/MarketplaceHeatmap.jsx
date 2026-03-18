@@ -4,7 +4,30 @@ import L from "leaflet"
 import "leaflet.heat"
 import "leaflet-rotatedmarker"
 import carIconUrl from "../assets/car.png"
+import { getInstructorLocations } from "../api/adminApi";
+import { usePolling } from "../hooks/usePolling";
+import InstructorLayer from "../components/map/InstructorLayer";
+import {
+  getLiquidityPressure,
+  getActiveLessonsMap,
+  getDispatchObservability,
+  getLiquidityRisk,
+  getInstructorDrift,
+  getDispatchReplay
+} from "../api/adminApi";
+import { safeArray } from "../api/normalizers";
 
+function HeatmapPage() {
+
+  const { data } = usePolling(getInstructorLocations, 2000);
+
+  return (
+    <div>
+      <h2>Instructor Debug View</h2>
+      <InstructorLayer instructors={data} />
+    </div>
+  );
+}
 
 
 /* ---------------------------------------------------
@@ -55,6 +78,7 @@ function DemandHeatmap({ zones }) {
 
 
 
+
 /* ---------------------------------------------------
    HELPER FUNCTIONS
 --------------------------------------------------- */
@@ -87,7 +111,7 @@ function waveColor(wave) {
   if (wave === 2) return "orange"
   if (wave === 3) return "red"
 
-  return "gray"
+   return "gray"
 
 }
 
@@ -130,109 +154,25 @@ export default function MarketplaceHeatmap() {
 
   const prevPositions = useRef({})
 
-  const [zones, setZones] = useState([])
-  const [instructors, setInstructors] = useState([])
-  const [activeLessons, setActiveLessons] = useState([])
-  const [routeCars, setRouteCars] = useState({})
-  const [dispatchWaves, setDispatchWaves] = useState([])
-  const [liquidityRisk, setLiquidityRisk] = useState([])
-  const [drift, setDrift] = useState([])
+  const { data: zones } = usePolling(getLiquidityPressure, 3000);
+  const { data: instructors } = usePolling(getInstructorLocations, 2000);
+  const { data: activeLessons } = usePolling(getActiveLessonsMap, 3000);
+  const { data: dispatchWaves } = usePolling(getDispatchObservability, 3000);
+  const { data: liquidityRisk } = usePolling(getLiquidityRisk, 3000);
+  const { data: drift } = usePolling(getInstructorDrift, 3000);
 
+
+  const [routeCars, setRouteCars] = useState({})
   const [replayOffers, setReplayOffers] = useState([])
   const [replayIndex, setReplayIndex] = useState(0)
   const [replayRunning, setReplayRunning] = useState(false)
 
-
-
-  /* ---------------------------------------------------
-     LOAD LIVE DATA
-  --------------------------------------------------- */
-
-  const loadReplay = async (lessonId) => {
-
-    const res = await fetch(
-      `http://localhost:5173/read/dispatch-observability?lesson_request_id=${lessonId}`
-    )
-
-    const data = await res.json()
-
-    setReplayOffers(data)
-    setReplayIndex(0)
-
-  }
-
-
-
-  useEffect(() => {
-
-    const load = async () => {
-
-      try {
-
-        const zonesRes = await fetch(
-          "http://localhost:5173/read/admin/liquidity-pressure"
-        )
-        const zonesData = await zonesRes.json()
-        setZones(zonesData)
-
-
-
-        const instRes = await fetch(
-          "http://localhost:5173/read/admin/instructor-locations"
-        )
-        const instData = await instRes.json()
-        setInstructors(instData)
-
-
-
-        const lessonRes = await fetch(
-          "http://localhost:5173/read/admin/active-lessons-map"
-        )
-        const lessonData = await lessonRes.json()
-        setActiveLessons(lessonData)
-
-
-
-        const dispatchRes = await fetch(
-          "http://localhost:5173/read/dispatch-observability"
-        )
-        const dispatchData = await dispatchRes.json()
-        setDispatchWaves(dispatchData)
-        
-      
-      
-        const riskRes = await fetch(
-          "http://localhost:5173/read/admin/liquidity-risk"
-        )
-
-        const riskData = await riskRes.json()
-        setLiquidityRisk(riskData)
-       
-
-
-        const driftRes = await fetch(
-          "http://localhost:5173/read/admin/instructor-drift"
-        )
-
-        const driftData = await driftRes.json()
-        setDrift(driftData)
-
-      } catch (err) {
-
-        console.error("heatmap error:", err)
-
-      }
-
-    }
-
-    load()
-
-    const interval = setInterval(load, 3000)
-
-    return () => clearInterval(interval)
-
-  }, [])
-
+  const [zones, setZones] = useState([])
+  const [instructors, setInstructors] = useState([])
+  const [activeLessons, setActiveLessons] = useState([])
+  const [dispatchWaves, setDispatchWaves] = useState([])
+  const [liquidityRisk, setLiquidityRisk] = useState([])
+  const [drift, setDrift] = useState([])
 
 
   /* ---------------------------------------------------
@@ -241,43 +181,43 @@ export default function MarketplaceHeatmap() {
 
   useEffect(() => {
 
-    const interval = setInterval(() => {
+  const interval = setInterval(() => {
 
-      setRouteCars(prev => {
+    setRouteCars(prev => {
 
-        const updated = { ...prev }
+      const updated = { ...prev }
 
-        activeLessons.forEach(lesson => {
+      safeArray(activeLessons).forEach(lesson => {
 
-          const start = [
-            Number(lesson.instructor_lat),
-            Number(lesson.instructor_lng)
-          ]
+        const start = [
+          Number(lesson.instructor_lat),
+          Number(lesson.instructor_lng)
+        ]
 
-          const end = [
-            Number(lesson.student_lat),
-            Number(lesson.student_lng)
-          ]
+        const end = [
+          Number(lesson.student_lat),
+          Number(lesson.student_lng)
+        ]
 
-          const progress =
-            (updated[lesson.lesson_id]?.progress ?? 0) + 0.05
+        const progress =
+          (updated[lesson.lesson_id]?.progress ?? 0) + 0.05
 
-          updated[lesson.lesson_id] = {
-            progress,
-            position: interpolatePosition(start, end, Math.min(progress, 1))
-          }
-
-        })
-
-        return updated
+        updated[lesson.lesson_id] = {
+          progress,
+          position: interpolatePosition(start, end, Math.min(progress, 1))
+        }
 
       })
 
-    }, 500)
+      return updated
 
-    return () => clearInterval(interval)
+    })
 
-  }, [activeLessons])
+  }, 500)
+
+  return () => clearInterval(interval)
+
+}, [activeLessons])
 
 
 
@@ -364,7 +304,7 @@ export default function MarketplaceHeatmap() {
 
 
         {/* Instructor cars */}
-        {instructors.map((inst) => {
+        {safeArray(instructors).map((inst) => {
 
           const prev = prevPositions.current[inst.instructor_id]
 
@@ -399,7 +339,7 @@ export default function MarketplaceHeatmap() {
 
 
         {/* Lesson routes */}
-        {activeLessons.map((lesson) => (
+        {safeArray(activeLessons).map((lesson) => (
 
           <Polyline
             key={lesson.lesson_id}
@@ -431,7 +371,7 @@ export default function MarketplaceHeatmap() {
 
 
         {/* Dispatch waves */}
-        {dispatchWaves.map((offer) => (
+        {safeArray(dispatchWaves).map((offer) => (
 
           <CircleMarker
             key={offer.instructor_id + "-" + offer.wave}
@@ -490,7 +430,7 @@ export default function MarketplaceHeatmap() {
 
         ))}
 
-      {liquidityRisk.map((zone) => {
+      {safeArray(liquidityRisk).map((zone) => {
 
         const coords = zoneCoordinates[zone.zone_id]
 
@@ -538,7 +478,7 @@ export default function MarketplaceHeatmap() {
 })}
 
 
-{drift.map((d) => (
+{safeArray(drift).map((d) => (
 
   <Polyline
     key={d.instructor_id}

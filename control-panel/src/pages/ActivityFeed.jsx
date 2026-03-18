@@ -1,47 +1,32 @@
-import { useEffect, useState } from "react"
-import { getRecentActivity } from "../api/adminApi"
+import { getEventStream } from "../api/adminApi";
+import { safeArray } from "../api/normalizers";
+import { usePolling } from "../hooks/usePolling";
 
 export default function ActivityFeed() {
 
-  const [events, setEvents] = useState([])
+  const { data, loading } = usePolling(getEventStream, 2000);
 
-  useEffect(() => {
+  const events = safeArray(data);
 
-    const load = () => {
-      getRecentActivity().then(res => {
-        console.log("Recent activity:", res.data)
-        setEvents(res.data)
-      })
-    }
-
-    load()
-
-    const interval = setInterval(load, 5000)
-
-    return () => clearInterval(interval)
-
-  }, [])
+  if (loading) {
+    return <div className="p-4">Loading...</div>;
+  }
 
   return (
-
     <div className="bg-white shadow rounded p-4">
 
       <h2 className="text-lg font-semibold mb-4">
-        Recent Activity
+        📡 Live Event Feed
       </h2>
 
       {events.length === 0 ? (
-
         <div className="text-gray-500">
-          No recent activity yet
+          No events yet
         </div>
-
       ) : (
-
         <ul className="space-y-2">
 
           {events.map((event, index) => (
-
             <li key={index} className="border-b pb-2">
 
               <div className="font-medium">
@@ -57,14 +42,11 @@ export default function ActivityFeed() {
               </div>
 
             </li>
-
           ))}
 
         </ul>
-
       )}
 
     </div>
-
-  )
+  );
 }

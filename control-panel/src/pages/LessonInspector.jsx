@@ -1,11 +1,14 @@
 import { useState } from "react"
 import { getEventStream, getDispatchObservability } from "../api/adminApi"
+import { safeArray } from "../api/normalizers";
 
 export default function LessonInspector() {
 
   const [lessonId, setLessonId] = useState("")
   const [events, setEvents] = useState([])
   const [dispatch, setDispatch] = useState([])
+  const safeEvents = safeArray(events);
+  const safeDispatch = safeArray(dispatch);
 
   const inspect = async () => {
 
@@ -14,9 +17,28 @@ export default function LessonInspector() {
     const eventsRes = await getEventStream(lessonId)
     const dispatchRes = await getDispatchObservability(lessonId)
 
-    setEvents(eventsRes.data)
-    setDispatch(dispatchRes.data)
+    setEvents(eventsRes)
+    setDispatch(dispatchRes)
   }
+
+
+   const sortedEvents = safeEvents.sort(
+    (a, b) => new Date(a.created_at) - new Date(b.created_at)
+   );
+
+
+   const hasDispatchStarted = sortedEvents.some(
+    e => e.event_type === "lesson_request_dispatch_started"
+   );
+
+   const offerCount = sortedEvents.filter(
+    e => e.event_type === "lesson_offer_sent"
+   ).length;
+
+   const isExpired = sortedEvents.some(
+    e => e.event_type === "lesson_request_expired"
+   );
+  
 
   return (
 
@@ -56,7 +78,7 @@ export default function LessonInspector() {
 
         <ul className="space-y-2">
 
-          {events.map((event, i) => (
+          {sortedEvents.map((event, i) => (
 
             <li key={i} className="border-b pb-2">
 
@@ -81,6 +103,12 @@ export default function LessonInspector() {
         <h3 className="font-semibold mb-3">
           Dispatch Decisions
         </h3>
+        
+        <div className="mb-3 text-sm">
+         <div>Dispatch Started: {hasDispatchStarted ? "✅" : "❌"}</div>
+         <div>Offers Sent: {offerCount}</div>
+         <div>Expired: {isExpired ? "⚠️ Yes" : "No"}</div>
+         </div>
 
         <table className="w-full">
 
@@ -95,7 +123,7 @@ export default function LessonInspector() {
 
           <tbody>
 
-            {dispatch.map((d, i) => (
+            {safeDispatch.map((d, i) => (
 
               <tr key={i} className="border-b">
 

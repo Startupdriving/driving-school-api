@@ -129,53 +129,45 @@ async function handleExpiredWave(client, requestId, currentWave) {
   const nextWave = currentWave + 1;
 
   try {
+    console.log("👉 CALLING DISPATCH for request:", requestId);
     await sendNextWaveOffers(client, requestId, nextWave);
+   console.log("✅ DISPATCH FINISHED for request:", requestId);
   } catch (err) {
     console.error("DISPATCH ERROR:", err);
   }
 
 } // ← closes handleExpiredWave
 
-
 // =======================================================
 // Dispatch next wave
 // =======================================================
 export async function sendNextWaveOffers(client, requestId, wave) {
 
-  console.log(
-    "Dispatch wave",
-    wave,
-    "for request",
-    requestId
-  );   
-  // 🔥 Fetch student_id for this request
-  const { rows: studentRequestRows } = await client.query(`
-    SELECT payload->>'student_id' AS student_id
+  console.log("🚀 DISPATCH START", { requestId, wave });
+
+  // 🔥 STEP 1 — Fetch request data ONCE
+  const { rows } = await client.query(`
+    SELECT
+      payload->>'zone_id' AS zone_id,
+      payload->>'student_id' AS student_id
     FROM event
     WHERE identity_id = $1
     AND event_type = 'lesson_requested'
+    ORDER BY created_at ASC
     LIMIT 1
   `, [requestId]);
 
-  const studentId = studentRequestRows.length > 0
-    ? studentRequestRows[0].student_id
-    : null;
+  if (!rows.length) {
+    console.log("❌ No lesson_requested event found");
+    return;
+  }
 
-// 🔥 Fetch request zone
-const { rows: zoneRows } = await client.query(`
-  SELECT (payload->>'zone_id')::int AS zone_id
-  FROM event
-  WHERE identity_id = $1
-  AND event_type = 'lesson_requested'
-  LIMIT 1
-`, [requestId]);
+  const zoneId = Number(rows[0].zone_id);
+  const studentId = rows[0].student_id || null;
 
-const requestZoneId =
-  zoneRows.length > 0
-    ? zoneRows[0].zone_id
-    : null;
-  
-  // Already offered instructors
+  console.log("📍 DISPATCH ZONE:", zoneId);
+
+  // 🔥 STEP 2 — Already offered instructors
   const { rows: offeredRows } = await client.query(`
     SELECT instructor_id
     FROM event
@@ -185,7 +177,7 @@ const requestZoneId =
 
   const offeredIds = offeredRows.map(r => r.instructor_id);
 
-  // 🔥 Fetch adaptive wave size
+  // 🔥 STEP 3 — Adaptive wave size
   const { rows: waveRow } = await client.query(`
     SELECT suggested_wave_size
     FROM marketplace_liquidity_pressure
@@ -197,7 +189,7 @@ const requestZoneId =
       ? parseInt(waveRow[0].suggested_wave_size)
       : 1;
 
-  // 🔥 Fetch student reliability
+  // 🔥 STEP 4 — Demand multiplier
   let demandMultiplier = 1;
 
   if (studentId) {
@@ -212,30 +204,24 @@ const requestZoneId =
         ? parseFloat(reliabilityRows[0].reliability_score)
         : 0;
 
-    if (reliability < 0) {
-      demandMultiplier = 0.5;
-    } else if (reliability < 0.2) {
-      demandMultiplier = 0.75;
-    }
+    if (reliability < 0) demandMultiplier = 0.5;
+    else if (reliability < 0.2) demandMultiplier = 0.75;
   }
 
-  // 🔥 Compute final wave size BEFORE candidate query
   const dynamicWaveSize = Math.max(
     1,
     Math.floor(adaptiveWaveSize * demandMultiplier)
   );
 
-console.log(
-  "Wave size:",
-  dynamicWaveSize,
-  "Adaptive:",
-  adaptiveWaveSize,
-  "Demand multiplier:",
-  demandMultiplier
-);
-  // 🔥 Select next eligible instructors
+  console.log("📊 Wave:", {
+    dynamicWaveSize,
+    adaptiveWaveSize,
+    demandMultiplier
+  });
+
+  // 🔥 STEP 5 — Candidate selection
   const { rows: candidates } = await client.query(
-`
+    `
 SELECT
   online.instructor_id,
   COALESCE(icz.zone_id, i.home_zone_id) AS instructor_zone
@@ -253,7 +239,7 @@ LEFT JOIN instructor_scoring s
 
 LEFT JOIN zone_distance_matrix zdm
   ON zdm.from_zone_id = COALESCE(icz.zone_id, i.home_zone_id)
-  AND zdm.to_zone_id = $4
+ AND zdm.to_zone_id = $4
 
 LEFT JOIN instructor_zone_supply_projection izsp
   ON i.home_zone_id = izsp.zone_id
@@ -268,10 +254,7 @@ ORDER BY
 (
   COALESCE(s.economic_score, 0)
 
-  + CASE
-      WHEN i.home_zone_id = $4 THEN 0.20
-      ELSE 0
-    END
+  + CASE WHEN i.home_zone_id = $4 THEN 0.20 ELSE 0 END
 
   + CASE
       WHEN i.home_zone_id = $4
@@ -293,22 +276,23 @@ online.instructor_id ASC
 
 LIMIT $2
 `,
-[
-  offeredIds.length
-    ? offeredIds
-    : ['00000000-0000-0000-0000-000000000000'],
-  dynamicWaveSize,
-  MAX_ACTIVE_OFFERS_PER_INSTRUCTOR,
-  requestZoneId
-]
-);
+    [
+      offeredIds.length
+        ? offeredIds
+        : ['00000000-0000-0000-0000-000000000000'],
+      dynamicWaveSize,
+      MAX_ACTIVE_OFFERS_PER_INSTRUCTOR,
+      zoneId
+    ]
+  );
 
-console.log(
-  "Dispatch candidates:",
-  candidates.map(c => c.instructor_id)
-);
-  // If no candidates → expire
+  console.log("👥 CANDIDATES FOUND:", candidates.length);
+  console.log("📦 CANDIDATE DATA:", candidates);
+
+  // 🔥 STEP 6 — No candidates → expire
   if (candidates.length === 0) {
+    console.log("❌ No instructors available");
+
     await client.query(`
       INSERT INTO event (id, identity_id, event_type, payload)
       VALUES ($1, $2, 'lesson_request_expired', $3)
@@ -321,7 +305,7 @@ console.log(
     return;
   }
 
-  // 🔥 Start next wave
+  // 🔥 STEP 7 — Start dispatch wave
   const expiresAt = new Date(Date.now() + WAVE_TIMEOUT_SECONDS * 1000);
 
   await client.query(`
@@ -337,83 +321,35 @@ console.log(
     })
   ]);
 
-if (!candidates.length) {
-  console.log("No instructors available for request", requestId);
-}
-
-  // Insert offers
+  // 🔥 STEP 8 — Send offers
   for (const instructor of candidates) {
 
-  const instructorId = instructor.instructor_id;
+    const instructorId = instructor.instructor_id;
 
-  try {
+    try {
+      await client.query(`
+        INSERT INTO event (
+          id,
+          identity_id,
+          event_type,
+          instructor_id,
+          payload
+        )
+        VALUES ($1, $2, 'lesson_offer_sent', $3, $4)
+      `, [
+        uuidv4(),
+        requestId,
+        instructorId,
+        JSON.stringify({ wave })
+      ]);
 
-    await client.query(`
-      INSERT INTO event (
-        id,
-        identity_id,
-        event_type,
-        instructor_id,
-        payload
-      )
-      VALUES ($1, $2, 'lesson_offer_sent', $3, $4)
-    `, [
-      uuidv4(),
-      requestId,
-      instructorId,
-      JSON.stringify({ wave })
-    ]);
+      console.log("✅ Offer sent →", instructorId);
 
-    console.log(
-      "Offer sent",
-      "request:", requestId,
-      "instructor:", instructorId,
-      "wave:", wave
-    );
-
-    await client.query(`
-      INSERT INTO instructor_pending_offers (
-        offer_id,
-        instructor_id,
-        lesson_request_id,
-        created_at,
-        expires_at
-      )
-      VALUES ($1, $2, $3, NOW(), NOW() + INTERVAL '20 seconds')
-    `, [
-      uuidv4(),
-      instructorId,
-      requestId
-    ]);
-
-    await client.query(`
-      INSERT INTO instructor_offer_stats (
-        instructor_id,
-        offers_last_24h,
-        last_offer_at
-      )
-      VALUES ($1, 1, NOW())
-      ON CONFLICT (instructor_id)
-      DO UPDATE SET
-        offers_last_24h = instructor_offer_stats.offers_last_24h + 1,
-        last_offer_at = NOW(),
-        updated_at = NOW()
-    `, [instructorId]);
-
-  } catch (err) {
-
-    console.error(
-      "Dispatch offer failed",
-      "request:", requestId,
-      "instructor:", instructorId,
-      "wave:", wave,
-      "error:", err.message
-    );
-
+    } catch (err) {
+      console.error("❌ Offer failed:", err.message);
+    }
   }
-
-} // closes for-loop
-
+}
 
 async function rebuildFairnessProjection(client) {
   await client.query(`
@@ -446,4 +382,5 @@ async function rebuildFairnessProjection(client) {
     GROUP BY instructor_id;
   `);
 }
-}
+
+

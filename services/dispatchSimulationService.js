@@ -4,6 +4,8 @@ import { sendNextWaveOffers } from "./dispatchWorker.js";
 
 export async function simulateDispatchRequests(count, zoneId) {
 
+console.log("🔥 FUNCTION ENTERED simulateDispatchRequests");
+
   const client = await pool.connect();
 
   try {
@@ -13,9 +15,11 @@ export async function simulateDispatchRequests(count, zoneId) {
     const createdRequests = [];
 
     for (let i = 0; i < count; i++) {
+ 
+    console.log("🔁 LOOP START", i);
 
       const requestId = uuidv4();
-
+       console.log("🧱 Creating request:", requestId);
       await client.query(`
         INSERT INTO identity (id, identity_type)
         VALUES ($1,'lesson_request')
@@ -38,8 +42,9 @@ export async function simulateDispatchRequests(count, zoneId) {
         })
       ]);
 
-      await sendNextWaveOffers(client, requestId, 1);
+       console.log("👉 ABOUT TO CALL DISPATCH:", requestId);
 
+       await sendNextWaveOffers(client, requestId, 1);
       createdRequests.push(requestId);
     }
 
