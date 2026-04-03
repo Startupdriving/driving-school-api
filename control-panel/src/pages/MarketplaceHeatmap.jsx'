@@ -59,13 +59,13 @@ export default function MarketplaceHeatmap() {
   --------------------------------------------------- */
 
   const [dispatchWaves, setDispatchWaves] = useState([]);
-  const [visibleWave, setVisibleWave] = useState(1);
   const [lessonId, setLessonId] = useState("");
   const [replayOffers, setReplayOffers] = useState([]);
   const [replayIndex, setReplayIndex] = useState(0);
   const [replayRunning, setReplayRunning] = useState(false);
+  const [visibleWave, setVisibleWave] = useState(1);
 
-  
+
 
   /* ---------------------------------------------------
      DATA (Polling)
@@ -79,7 +79,38 @@ export default function MarketplaceHeatmap() {
   const { data: drift } = usePolling(getInstructorDrift, 3000);
 
   console.log("DISPATCH WAVES:", dispatchWaves);
-  console.log("VISIBLE WAVE:", visibleWave);
+
+  
+   /* ---------------- EFFECTS ---------------- */
+
+  // ✅ STEP 2
+  useEffect(() => {
+    if (!dispatchWaves || dispatchWaves.length === 0) return;
+    setVisibleWave(1);
+  }, [dispatchWaves]);
+
+  // ✅ STEP 3
+  useEffect(() => {
+    if (!dispatchWaves || dispatchWaves.length === 0) return;
+
+    const maxWave = Math.max(...dispatchWaves.map(w => w.wave));
+    let current = 1;
+
+    const interval = setInterval(() => {
+      current++;
+
+      if (current > maxWave) {
+        clearInterval(interval);
+        return;
+      }
+
+      setVisibleWave(current);
+
+    }, 1000);
+
+    return () => clearInterval(interval);
+
+  }, [dispatchWaves]);
 
   /* ---------------------------------------------------
      DERIVED DATA
@@ -162,7 +193,6 @@ export default function MarketplaceHeatmap() {
 
     <button
       onClick={() => {
-        console.log("INPUT LESSON ID:", lessonId);
         if (!lessonId) return;
         loadReplay(lessonId);
       }}
@@ -195,7 +225,6 @@ export default function MarketplaceHeatmap() {
         <DispatchWaveLayer
           waves={sortedWaves}
           zonesMap={zonesMap}
-          visibleWave={visibleWave}
         />
 
         {/* Replay */}

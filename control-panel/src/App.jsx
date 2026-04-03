@@ -1,5 +1,6 @@
+import InstructorApp from "./app/instructor/InstructorApp"
 import { BrowserRouter, Routes, Route } from "react-router-dom"
-
+import StudentApp from "./app/student/StudentApp"
 import Layout from "./layout/Layout"
 import MarketplaceHeatmap from "./pages/MarketplaceHeatmap"
 import Dashboard from "./pages/Dashboard"
@@ -35,6 +36,9 @@ export default function App() {
           <Route path="/maintenance" element={<ProjectionMaintenance />} />
 
         </Route>
+
+          <Route path="/student" element={<StudentApp />} />
+          <Route path="/instructor" element={<InstructorApp />} />
 
       </Routes>
 

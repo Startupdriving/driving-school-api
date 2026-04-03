@@ -1,3 +1,4 @@
+import { rebuildProjections } from "./projectionRebuildService.js";
 import { sendNextWaveOffers } from "./dispatchWorker.js";
 import { v4 as uuidv4 } from "uuid";
 import { withIdempotency } from "./idempotencyService.js";
@@ -106,14 +107,14 @@ console.log("INSERT lesson_requested event");
 );
 
       await sendNextWaveOffers(client, requestId, 1);
-
-
       return {
         message: "Lesson request created and offers dispatched",
         lesson_request_id: requestId
       };
 
     });
+
+    await rebuildProjections();
 
     res.status(201).json(response);
 
@@ -225,7 +226,7 @@ export async function acceptOffer(req, res) {
         `,
         [requestId, instructorId]
       );
-
+     console.log("🔥 LESSON REQUEST SERVICE OFFER RUNNING");
       if (offerResult.rowCount === 0) {
         throw new Error("No offer found for instructor");
       }
@@ -317,6 +318,7 @@ export async function acceptOffer(req, res) {
       );
 
 // 🔥 Update fairness projection for confirmation
+console.log("🔥 INSERT 331 HIT");
 await client.query(
   `
   UPDATE instructor_offer_stats
@@ -329,7 +331,7 @@ await client.query(
 
       // Create lesson identity
       const lessonId = uuidv4();
-
+console.log("🔥 INSERT 339 HIT");
 await client.query(`
 INSERT INTO identity(id, identity_type)
 VALUES ($1,'lesson')

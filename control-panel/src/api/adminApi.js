@@ -26,9 +26,16 @@ export const rebuildProjections = () => {
   return api.post("/admin/rebuild-projections")
 }
 
-export async function getEventStream() {
-  const res = await fetch("http://localhost:5173/read/event-stream");
-  return res.json();
+export const getEventStream = async (id) => {
+  const res = await fetch(`http://localhost:5173/read/event-stream?identity_id=${id}`)
+
+  if (!res.ok) {
+    const text = await res.text()
+    console.error("EVENT STREAM ERROR:", text)
+    throw new Error("Event stream failed")
+  }
+
+  return res.json()
 }
 
 export async function getInstructorLocations() {
@@ -42,8 +49,15 @@ export const getLiquidityPressure = () =>
 export const getActiveLessonsMap = () =>
   fetch("http://localhost:5173/read/admin/active-lessons-map").then(r => r.json());
 
-export const getDispatchObservability = () =>
-  fetch("http://localhost:5173/read/dispatch-observability").then(r => r.json());
+export const getDispatchObservability = (lessonId) => {
+
+  if (!lessonId) return Promise.resolve([]); // safety
+
+  return fetch(
+    `http://localhost:5173/read/dispatch-observability?lesson_request_id=${lessonId}`
+  ).then(r => r.json());
+
+};
 
 export const getLiquidityRisk = () =>
   fetch("http://localhost:5173/read/admin/liquidity-risk").then(r => r.json());
@@ -54,3 +68,47 @@ export const getInstructorDrift = () =>
 export const getDispatchReplay = (lessonId) =>
   fetch(`http://localhost:5173/read/dispatch-observability?lesson_request_id=${lessonId}`)
     .then(r => r.json());
+
+export async function getZones() {
+  const res = await fetch("http://localhost:5173/read/zones");
+  return res.json();
+}
+
+
+const BASE_URL = "http://localhost:5173" // your backend port
+
+export const requestLesson = async (data) => {
+  const idempotencyKey = crypto.randomUUID()
+
+  const res = await fetch(`${BASE_URL}/write/lesson-request/request`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Idempotency-Key": idempotencyKey, // ⭐ REQUIRED
+    },
+    body: JSON.stringify(data),
+  })
+
+  if (!res.ok) {
+    const text = await res.text()
+    console.error("API ERROR:", text)
+    throw new Error("Request failed")
+  }
+
+  return res.json()
+}
+
+
+export const getInstructorOffers = async (instructorId) => {
+  const res = await fetch(
+    `http://localhost:5173/read/instructor/offers?instructor_id=${instructorId}`
+  )
+
+  if (!res.ok) {
+    const text = await res.text()
+    console.error("OFFERS ERROR:", text)
+    throw new Error("Failed to fetch offers")
+  }
+
+  return res.json()
+}

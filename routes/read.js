@@ -4,6 +4,7 @@ import { getInstructorDailySchedule } from "../services/instructorService.js";
 import express from "express";
 import pool from "../db.js";
 import crypto from "crypto"
+import { validate as isUUID } from "uuid";
 
 const router = express.Router();
 
@@ -96,17 +97,26 @@ router.get("/instructor/offers", async (req, res) => {
 
   try {
 
-    const { rows } = await client.query(`
-      SELECT
-        offer_id,
-        lesson_request_id,
-        instructor_id,
-        expires_at,
-        created_at
-      FROM instructor_pending_offers
-      WHERE instructor_id = $1
-      ORDER BY created_at ASC
-    `, [instructor_id]);
+console.log("🔥 API instructor_id:", instructor_id);
+
+    const { rows } = await pool.query(`
+  SELECT
+    instructor_id,
+    lesson_request_id,
+    status,
+    created_at
+    FROM instructor_offers_projection iop
+    WHERE iop.instructor_id = $1
+
+    AND NOT EXISTS (
+    SELECT 1
+    FROM event e
+    WHERE e.identity_id = iop.lesson_request_id
+    AND e.event_type = 'lesson_confirmed'
+    )
+
+   ORDER BY created_at DESC
+`, [instructor_id]);
 
     res.json(rows);
 
@@ -453,20 +463,29 @@ router.get("/dispatch-observability", async (req, res) => {
 
   try {
 
-    const lessonId = req.query.lesson_request_id
+    const rawId = req.query.lesson_request_id;
+
+const lessonId = req.query.lesson_request_id || null;
 
     const result = await pool.query(`
-      SELECT
-        instructor_id,
-        economic_score,
-        wave,
-        instructor_zone,
-        request_zone,
-        offer_created_at
-      FROM dispatch_observability_projection
-      WHERE lesson_request_id = $1
-      ORDER BY wave
-    `, [lessonId])
+  SELECT DISTINCT ON (lesson_request_id, instructor_id, wave)
+    lesson_request_id,
+    instructor_id,
+    wave,
+    offer_created_at,
+    instructor_zone,
+    request_zone,
+    economic_score,
+    offers_last_24h,
+    last_offer_at
+  FROM dispatch_observability_projection
+  WHERE ($1::uuid IS NULL OR lesson_request_id = $1::uuid)
+  ORDER BY
+    lesson_request_id,
+    instructor_id,
+    wave,
+    offer_created_at DESC
+`, [lessonId]);
 
     res.json(result.rows)
 
@@ -748,5 +767,36 @@ router.get("/admin/instructor-drift", async (req, res) => {
   }
 
 })
+
+router.get("/zones", async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT id, zone_code, zone_name, min_lat, max_lat, min_lng, max_lng
+      FROM geo_zones
+    `);
+
+    res.json(result.rows);
+
+  } catch (err) {
+    console.error("zones fetch error:", err);
+    res.status(500).json({ error: "zones_fetch_failed" });
+  }
+});
+
+
+router.get("/instructor-active-lesson/:id", async (req, res) => {
+
+  const { id } = req.params;
+
+  const result = await pool.query(`
+    SELECT *
+    FROM active_lessons_projection
+    WHERE instructor_id = $1
+    LIMIT 1
+  `, [id]);
+
+  res.json(result.rows[0] || null);
+});
+
 
 export default router;

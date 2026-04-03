@@ -11,6 +11,7 @@ const REBUILD_INTERVAL_MS = 10 * 60 * 1000; // 10 min
 
 export function startDispatchWorker() {
   console.log("🚀 Dispatch worker started");
+  console.log("🔥 DISPATCH WORKER OFFER RUNNING");
 
   let workerRunning = false;
 
@@ -78,6 +79,7 @@ async function processExpiredWaves() {
 async function handleExpiredWave(client, requestId, currentWave) {
 
   // 1️⃣ Append wave_completed
+console.log("🔥 INSERT 83 HIT");
   await client.query(
     `
     INSERT INTO event (id, identity_id, event_type, payload)
@@ -108,6 +110,7 @@ async function handleExpiredWave(client, requestId, currentWave) {
 
   if (waveCount >= MAX_WAVES) {
     // Expire due to max waves
+console.log("🔥 INSERT 113 HIT");
     await client.query(
       `
       INSERT INTO event (id, identity_id, event_type, payload)
@@ -219,7 +222,23 @@ export async function sendNextWaveOffers(client, requestId, wave) {
     demandMultiplier
   });
 
+
+// 🛑 STOP if already confirmed
+const confirmed = await client.query(`
+  SELECT 1
+  FROM event
+  WHERE identity_id = $1
+  AND event_type = 'lesson_confirmed'
+  LIMIT 1
+`, [requestId]);
+
+if (confirmed.rows.length > 0) {
+  console.log("🛑 STOP DISPATCH — already confirmed:", requestId);
+  return;
+}
+
   // 🔥 STEP 5 — Candidate selection
+
   const { rows: candidates } = await client.query(
     `
 SELECT
@@ -282,16 +301,18 @@ LIMIT $2
         : ['00000000-0000-0000-0000-000000000000'],
       dynamicWaveSize,
       MAX_ACTIVE_OFFERS_PER_INSTRUCTOR,
-      zoneId
+     zoneId
     ]
   );
 
-  console.log("👥 CANDIDATES FOUND:", candidates.length);
-  console.log("📦 CANDIDATE DATA:", candidates);
+
+console.log("🔥 SIMPLE CANDIDATES:", candidates);
+console.log("🔥 CANDIDATE COUNT:", candidates.length);
 
   // 🔥 STEP 6 — No candidates → expire
   if (candidates.length === 0) {
     console.log("❌ No instructors available");
+    console.log("🔥 INSERT 297 HIT");
 
     await client.query(`
       INSERT INTO event (id, identity_id, event_type, payload)
@@ -307,7 +328,8 @@ LIMIT $2
 
   // 🔥 STEP 7 — Start dispatch wave
   const expiresAt = new Date(Date.now() + WAVE_TIMEOUT_SECONDS * 1000);
-
+ console.log("🔥 INSERT 312 HIT");
+ 
   await client.query(`
     INSERT INTO event (id, identity_id, event_type, payload)
     VALUES ($1, $2, 'lesson_request_dispatch_started', $3)
@@ -323,26 +345,35 @@ LIMIT $2
 
   // 🔥 STEP 8 — Send offers
   for (const instructor of candidates) {
+    console.log("🔥 INSERT 331 HIT");
 
     const instructorId = instructor.instructor_id;
+    console.log("INSTRUCTOR DEBUG:", instructor);
 
     try {
-      await client.query(`
-        INSERT INTO event (
-          id,
-          identity_id,
-          event_type,
-          instructor_id,
-          payload
-        )
-        VALUES ($1, $2, 'lesson_offer_sent', $3, $4)
-      `, [
-        uuidv4(),
-        requestId,
-        instructorId,
-        JSON.stringify({ wave })
-      ]);
+    console.log("🔥 INSERT 339 HIT");
 
+      await client.query(`
+  INSERT INTO event (
+    id,
+    identity_id,
+    event_type,
+    instructor_id,   -- ⭐ ADD THIS
+    payload
+  )
+  VALUES ($1, $2, 'lesson_offer_sent', $3, $4)
+`, [
+  uuidv4(),
+  requestId,
+  instructor.instructor_id,   // ⭐ CRITICAL
+  JSON.stringify({
+  instructor_id: instructor.instructor_id,
+  lesson_request_id: requestId,
+  wave: wave
+})
+])
+
+     console.log("INSTRUCTOR OBJECT:", instructor)
       console.log("✅ Offer sent →", instructorId);
 
     } catch (err) {
@@ -350,6 +381,10 @@ LIMIT $2
     }
   }
 }
+
+
+
+
 
 async function rebuildFairnessProjection(client) {
   await client.query(`
