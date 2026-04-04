@@ -346,7 +346,7 @@ router.get("/marketplace-live-state", async (req, res) => {
 
 console.log("Instructor dashboard route loaded");
 
-router.get("/instructor-dashboard", async (req, res) => {
+/*router.get("/instructor-dashboard", async (req, res) => {
 
   const { instructor_id } = req.query;
 
@@ -371,7 +371,66 @@ router.get("/instructor-dashboard", async (req, res) => {
 
   }
 
+});*/
+
+
+
+router.get("/instructor-dashboard/:id", async (req, res) => {
+
+  const { id } = req.params;
+
+  try {
+
+    // 🔹 ACTIVE LESSON (REAL lesson_id)
+    const activeLessonRes = await pool.query(`
+      SELECT e.identity_id AS lesson_id,
+             (e.payload->>'lesson_request_id')::uuid AS lesson_request_id
+      FROM event e
+      WHERE e.event_type = 'lesson_created'
+      AND e.instructor_id = $1
+      AND NOT EXISTS (
+        SELECT 1 FROM event e2
+        WHERE e2.identity_id = e.identity_id
+        AND e2.event_type IN ('lesson_completed','lesson_cancelled')
+      )
+      LIMIT 1
+    `, [id]);
+
+    const activeLesson = activeLessonRes.rows[0] || null;
+
+    // 🔹 OFFERS
+    const offersRes = await pool.query(`
+      SELECT *
+      FROM instructor_offers_projection
+      WHERE instructor_id = $1
+      ORDER BY created_at DESC
+    `, [id]);
+
+    const offers = offersRes.rows;
+
+    // 🔹 STATUS LOGIC
+    let status = "idle";
+
+    if (activeLesson) {
+      status = "active";
+    } else if (offers.length > 0) {
+      status = "has_offer";
+    }
+
+    res.json({
+      instructor_id: id,
+      status,
+      active_lesson: activeLesson,
+      offers
+    });
+
+  } catch (err) {
+    console.error("DASHBOARD ERROR:", err);
+    res.status(500).json({ error: "dashboard_failed" });
+  }
+
 });
+
 
 router.post("/admin/rebuild-projections", async (req, res) => {
 

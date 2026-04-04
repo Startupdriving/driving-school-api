@@ -1,23 +1,20 @@
-import { useEffect, useState } from "react"
-import { getInstructorOffers } from "../../api/adminApi"
+import { useEffect, useState, useRef } from "react";
 
 export default function InstructorOffers() {
 
 
-  const [offers, setOffers] = useState([])
 
-  const [activeLesson, setActiveLesson] = useState(null)
+  const [dashboard, setDashboard] = useState(null);
 
   const instructorId = "c3850192-57b4-4b1d-916f-726af500360c"
 
-
+  const wsRef = useRef(null);
 
 
 
 
    const handleAccept = async (offer) => {
   try {
-
     const res = await fetch("http://localhost:5173/write/instructor/accept-offer", {
       method: "POST",
       headers: {
@@ -36,10 +33,8 @@ export default function InstructorOffers() {
       return;
     }
 
-    setActiveLesson({
-  lesson_id: data.lesson_id,
-  lesson_request_id: offer.lesson_request_id 
-  });
+    // ✅ ONLY THIS
+    fetchDashboard();
 
   } catch (err) {
     console.error(err);
@@ -48,52 +43,30 @@ export default function InstructorOffers() {
     
 
 
-const fetchOffers = async () => {
-  try {
-    const res = await getInstructorOffers(instructorId)
 
-    console.log("OFFERS RESPONSE:", res)
 
-    const sorted = (res || []).sort(
-      (a, b) => new Date(b.created_at) - new Date(a.created_at)
-    )
-
-    setOffers(prev => {
-  return sorted.map(newOffer => {
-    const existing = prev.find(
-      o => o.lesson_request_id === newOffer.lesson_request_id
-    );
-
-    return existing?.lesson_id
-      ? { ...newOffer, lesson_id: existing.lesson_id }
-      : newOffer;
-  });
-});
-
-  } catch (err) {
-    console.error(err)
-  }
-}
 
 
 
 const startLesson = async () => {
-  
-console.log("ACTIVE LESSON:", activeLesson);  
 
-  if (!activeLesson?.lesson_id) {
-  alert("Lesson not created yet");
-  return;
-}
+  console.log("DASHBOARD ACTIVE:", dashboard.active_lesson);
 
-await fetch("http://localhost:5173/write/lesson/start", {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({
-    instructor_id: instructorId,
-    lesson_id: activeLesson.lesson_id
-  })
-});
+  if (!dashboard?.active_lesson?.lesson_id) {
+    alert("Lesson not created yet");
+    return;
+  }
+
+  await fetch("http://localhost:5173/write/lesson/start", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      instructor_id: instructorId,
+      lesson_id: dashboard.active_lesson.lesson_id
+    })
+  });
+
+  fetchDashboard();
 };
 
 
@@ -102,108 +75,144 @@ await fetch("http://localhost:5173/write/lesson/start", {
 
 
 const completeLesson = async () => {
-  if (!activeLesson?.lesson_id) return;
+
+  if (!dashboard?.active_lesson?.lesson_id) return;
 
   await fetch("http://localhost:5173/write/lesson/complete", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       instructor_id: instructorId,
-      lesson_id: activeLesson.lesson_id
+      lesson_id: dashboard.active_lesson.lesson_id
     })
   });
+
+  fetchDashboard();
 };
   
 
 
 const cancelLesson = async () => {
 
-  if (!activeLesson?.lesson_id) return;
+  if (!dashboard?.active_lesson?.lesson_id) return;
 
   await fetch("http://localhost:5173/write/lesson/cancel", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       instructor_id: instructorId,
-      lesson_id: activeLesson.lesson_id
+      lesson_id: dashboard.active_lesson.lesson_id
     })
   });
 
-  // optional: clear UI
-  setActiveLesson(null);
+  fetchDashboard();
 };
 
 
-const fetchActiveLesson = async () => {
-  const res = await fetch(
-    `http://localhost:5173/read/instructor-active-lesson/${instructorId}`
-  );
-  const data = await res.json();
 
-  setActiveLesson(data);
+const fetchDashboard = async () => {
+  try {
+    const res = await fetch(
+      `http://localhost:5173/read/instructor-dashboard/${instructorId}`
+    );
+
+    const data = await res.json();
+    setDashboard(data);
+
+    console.log("DASHBOARD:", data);
+
+  } catch (err) {
+    console.error(err);
+  }
 };
 
 
- useEffect(() => {
 
-  fetchActiveLesson();
-  fetchOffers();   // ❗ make sure this still runs
+useEffect(() => {
 
   const interval = setInterval(() => {
-    fetchActiveLesson();
-    fetchOffers();
+    fetchDashboard();
   }, 5000);
 
-  return () => clearInterval(interval);
 
-}, []);  
+  if (wsRef.current) return; // 🛑 prevent duplicate
+
+  const ws = new WebSocket("ws://localhost:5173");
+
+  wsRef.current = ws;
+
+  ws.onopen = () => {
+    console.log("WS CONNECTED");
+
+    ws.send(JSON.stringify({
+      type: "register",
+      instructor_id: instructorId
+    }));
+  };
+
+  ws.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+
+    console.log("WS EVENT:", data);
+
+    if (data.type === "new_offer" || data.type === "dashboard_update") {
+      fetchDashboard();
+    }
+  };
+
+  ws.onclose = () => {
+    console.log("WS CLOSED");
+    wsRef.current = null; // 🔥 IMPORTANT
+  };
+
+  return () => {
+    // ❌ DO NOT CLOSE in dev (prevents race)
+  };
+
+}, []);
+
+  
 
 
-  return (
+  if (!dashboard) return <p>Loading...</p>;
+
+return (
   <div>
 
-    <h2>Instructor Panel</h2>
+    <h2>Instructor Dashboard</h2>
 
-    {/* 🟢 ACTIVE LESSON */}
-    {activeLesson && (
+    <p>Status: {dashboard.status}</p>
+
+    {/* ACTIVE */}
+    {dashboard.status === "active" && (
       <div>
         <h3>Active Lesson</h3>
-        <p>Lesson ID: {activeLesson.lesson_id}</p>
-        <p>Status: {activeLesson.status}</p>
 
-        <button onClick={startLesson}>
-          Start Lesson
-        </button>
+        <p>Lesson ID: {dashboard.active_lesson.lesson_id}</p>
 
-        <button onClick={completeLesson}>
-          Complete Lesson
-        </button>
-
-        <button onClick={cancelLesson}>
-          Cancel Lesson
-        </button>
+        <button onClick={startLesson}>Start</button>
+        <button onClick={completeLesson}>Complete</button>
+        <button onClick={cancelLesson}>Cancel</button>
       </div>
     )}
 
-    {/* 🔵 OFFERS (ONLY IF NO ACTIVE LESSON) */}
-    {!activeLesson && (
+    {/* OFFERS */}
+    {dashboard.status === "has_offer" && (
       <div>
+        <h3>Offers</h3>
 
-        <h3>Available Offers</h3>
-
-        {offers.length === 0 && <p>No offers</p>}
-
-        {offers.map((offer) => (
-          <div key={offer.lesson_request_id}>
-            <p>Request: {offer.lesson_request_id}</p>
-
-            <button onClick={() => handleAccept(offer)}>
-              Accept
-            </button>
+        {dashboard.offers.map(o => (
+          <div key={o.lesson_request_id}>
+            <p>{o.lesson_request_id}</p>
+            <button onClick={() => handleAccept(o)}>Accept</button>
           </div>
         ))}
-
       </div>
+    )}
+
+    {/* IDLE */}
+    {dashboard.status === "idle" && (
+      <p>Waiting for requests...</p>
     )}
 
   </div>

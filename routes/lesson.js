@@ -1,6 +1,7 @@
 import { rebuildProjections } from "../services/projectionRebuildService.js";
 import express from "express";
 import pool from "../db.js";
+import { emitToInstructor } from "../services/wsService.js";
 import { v4 as uuidv4 } from "uuid";
 import {
   scheduleLesson,
@@ -97,6 +98,12 @@ router.post("/start", async (req, res) => {
 
     await client.query("COMMIT");
 
+
+
+    emitToInstructor(instructor_id, {
+    type: "dashboard_update"
+    });
+
     rebuildProjections().catch(console.error);
 
     res.json({ status: "lesson_started" });
@@ -177,6 +184,11 @@ router.post("/complete", async (req, res) => {
     ]);
 
     await client.query("COMMIT");
+
+
+   emitToInstructor(instructor_id, {
+   type: "dashboard_update"
+   });
 
     await rebuildProjections();
 
@@ -267,6 +279,12 @@ router.post("/cancel", async (req, res) => {
 
 
     await client.query("COMMIT");
+
+
+    emitToInstructor(instructor_id, {
+    type: "dashboard_update"
+    });
+
 
     await rebuildProjections();
 

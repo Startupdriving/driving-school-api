@@ -1,4 +1,4 @@
-CREATE OR REPLACE VIEW instructor_dashboard_projection AS
+CREATE VIEW instructor_dashboard_projection AS
 SELECT
 
   i.id AS instructor_id,
@@ -6,17 +6,25 @@ SELECT
   -- pending offers
   (
     SELECT COUNT(*)
-    FROM instructor_offers_projection iop
-    WHERE iop.instructor_id = i.id
+    FROM instructor_pending_offers ipo
+    WHERE ipo.instructor_id = i.id
   ) AS pending_offers,
 
-  -- active lesson
+  -- ✅ REAL lesson_id (NOT lesson_request_id)
   (
-    SELECT lt.lesson_request_id
-    FROM lesson_timeline_projection lt
-    WHERE lt.instructor_id = i.id
-    AND lt.completed_at IS NULL
-    AND lt.cancelled_at IS NULL
+    SELECT e.identity_id
+    FROM event e
+    WHERE e.event_type = 'lesson_created'
+    AND e.instructor_id = i.id
+
+    AND (e.payload->>'lesson_request_id')::uuid IN (
+      SELECT lt.lesson_request_id
+      FROM lesson_timeline_projection lt
+      WHERE lt.instructor_id = i.id
+      AND lt.completed_at IS NULL
+      AND lt.cancelled_at IS NULL
+    )
+
     LIMIT 1
   ) AS active_lesson_id,
 
@@ -29,10 +37,8 @@ SELECT
     AND lt.started_at IS NULL
   ) AS upcoming_lessons,
 
-  -- instructor earnings
   COALESCE(ie.instructor_earnings_total,0) AS total_earnings,
 
-  -- instructor zone
   z.zone_name AS current_zone
 
 FROM identity i

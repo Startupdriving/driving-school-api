@@ -3,6 +3,7 @@ import { rebuildProjections } from "../services/projectionRebuildService.js";
 import { v4 as uuidv4 } from "uuid";
 import { setInstructorAvailability } from "../services/instructorService.js";
 import express from "express";
+import { emitToInstructor } from "../services/wsService.js";
 import {
   createStudent,
   activateStudent,
@@ -135,6 +136,11 @@ router.post("/instructor/accept-offer", async (req, res) => {
     ]);
 
     await client.query("COMMIT");
+
+
+    emitToInstructor(instructor_id, {
+    type: "dashboard_update"
+    });
 
     console.log("✅ LESSON CONFIRMED:", lesson_request_id);
 

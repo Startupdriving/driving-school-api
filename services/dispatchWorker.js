@@ -1,6 +1,9 @@
 import pool from "../db.js";
 import { resolveZone } from "./zoneResolver.js";
 import { v4 as uuidv4 } from "uuid";
+import { emitToInstructor } from "./wsService.js";
+import { rebuildProjections } from "./projectionRebuildService.js";
+
 
 const MAX_ACTIVE_OFFERS_PER_INSTRUCTOR = 3;
 const MAX_WAVES = 3;
@@ -10,7 +13,7 @@ let lastRebuildTime = Date.now();
 const REBUILD_INTERVAL_MS = 10 * 60 * 1000; // 10 min
 
 export function startDispatchWorker() {
-  console.log("🚀 Dispatch worker started");
+  
   console.log("🔥 DISPATCH WORKER OFFER RUNNING");
 
   let workerRunning = false;
@@ -376,13 +379,16 @@ console.log("🔥 CANDIDATE COUNT:", candidates.length);
      console.log("INSTRUCTOR OBJECT:", instructor)
       console.log("✅ Offer sent →", instructorId);
 
+     emitToInstructor(instructorId, {
+     type: "new_offer"
+     });
+
+
     } catch (err) {
       console.error("❌ Offer failed:", err.message);
     }
   }
 }
-
-
 
 
 
