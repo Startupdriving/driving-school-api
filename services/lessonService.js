@@ -1,6 +1,7 @@
 import { withIdempotency } from "./idempotencyService.js";
 import pool from "../db.js";
 import crypto from "crypto";
+import { createLesson } from "./lessonEngine.js";
 
 function generateUUID() {
   return crypto.randomUUID();
@@ -12,7 +13,11 @@ function isValidUUID(id) {
   return uuidRegex.test(id);
 }
 
+
+
 export async function scheduleLesson(req, res) {
+  console.log("🚀 scheduleLesson HIT");
+
   try {
     const response = await withIdempotency(req, async (client) => {
 
@@ -24,6 +29,7 @@ export async function scheduleLesson(req, res) {
         end_time
       } = req.body;
 
+      // 🧠 INPUT VALIDATION
       if (!student_id || !instructor_id || !car_id || !start_time || !end_time) {
         throw new Error("All fields required");
       }
@@ -42,212 +48,117 @@ export async function scheduleLesson(req, res) {
       const startTime = start_time;
       const endTime = end_time;
 
-      const payload = {
-        student_id: studentId,
-        instructor_id: instructorId,
-        car_id: carId,
-        start_time: startTime,
-        end_time: endTime
-      };
-
-      const lessonId = generateUUID();
-
-      // 1️⃣ Validate active student
+      // 🧠 1 — STUDENT VALIDATION
       const studentCheck = await client.query(
         `SELECT 1 FROM current_active_students WHERE id = $1`,
         [studentId]
       );
+
       if (studentCheck.rowCount === 0) {
         throw new Error("Student not active");
       }
 
-      // 2️⃣ Validate active instructor
+      // 🧠 2 — INSTRUCTOR VALIDATION
       const instructorCheck = await client.query(
         `SELECT 1 FROM current_active_instructors WHERE id = $1`,
         [instructorId]
       );
+
       if (instructorCheck.rowCount === 0) {
         throw new Error("Instructor not active");
       }
 
-      
-      // 3️⃣ Validate instructor runtime availability
-const runtimeCheck = await client.query(
-  `
-  SELECT runtime_state
-  FROM current_instructor_runtime_state
-  WHERE instructor_id = $1
-  `,
-  [instructorId]
-);
+      // 🧠 3 — RUNTIME STATE
+      const runtimeCheck = await client.query(`
+        SELECT runtime_state
+        FROM current_instructor_runtime_state
+        WHERE instructor_id = $1
+      `, [instructorId]);
 
-if (
-  runtimeCheck.rowCount === 0 ||
-  runtimeCheck.rows[0].runtime_state !== "instructor_online"
-) {
-  throw new Error("Instructor is not available right now");
-}
+      if (
+        runtimeCheck.rowCount === 0 ||
+        runtimeCheck.rows[0].runtime_state !== "instructor_online"
+      ) {
+        throw new Error("Instructor is not available right now");
+      }
 
-
-      // 4️⃣ Validate active car
+      // 🧠 4 — CAR VALIDATION
       const carCheck = await client.query(
         `SELECT 1 FROM current_active_cars WHERE id = $1`,
         [carId]
       );
+
       if (carCheck.rowCount === 0) {
         throw new Error("Car not active");
       }
 
+      // 🧠 5 — INSTRUCTOR AVAILABILITY
+      const instructorAvailability = await client.query(`
+        SELECT 1
+        FROM event
+        WHERE identity_id = $1
+          AND event_type = 'instructor_availability_set'
+          AND (payload->>'day_of_week')::int = EXTRACT(DOW FROM $2::timestamptz)
+          AND $3::time >= (payload->>'start_time')::time
+          AND $4::time <= (payload->>'end_time')::time
+      `, [
+        instructorId,
+        startTime,
+        startTime.split("T")[1].substring(0, 5),
+        endTime.split("T")[1].substring(0, 5)
+      ]);
 
+      if (instructorAvailability.rowCount === 0) {
+        throw new Error("Instructor not available during requested time");
+      }
 
-        // 4️⃣ Instructor availability
-        const instructorAvailability = await client.query(
-          `
-          SELECT 1
-          FROM event e
-          WHERE e.identity_id = $1
-            AND e.event_type = 'instructor_availability_set'
-            AND (e.payload->>'day_of_week')::int = EXTRACT(DOW FROM $2::timestamptz)
-            AND $3::time >= (e.payload->>'start_time')::time
-            AND $4::time <= (e.payload->>'end_time')::time
-          `,
-          [
-            instructorId,
-            startTime,
-            startTime.split("T")[1].substring(0, 5),
-            endTime.split("T")[1].substring(0, 5)
-          ]
-        );
+      // 🧠 6 — CAR AVAILABILITY
+      const carAvailability = await client.query(`
+        SELECT 1
+        FROM event
+        WHERE identity_id = $1
+          AND event_type = 'car_availability_set'
+          AND (payload->>'day_of_week')::int = EXTRACT(DOW FROM $2::timestamptz)
+          AND $3::time >= (payload->>'start_time')::time
+          AND $4::time <= (payload->>'end_time')::time
+      `, [
+        carId,
+        startTime,
+        startTime.split("T")[1].substring(0, 5),
+        endTime.split("T")[1].substring(0, 5)
+      ]);
 
-        if (instructorAvailability.rowCount === 0) {
-          throw new Error("Instructor not available during requested time");
-        }
+      if (carAvailability.rowCount === 0) {
+        throw new Error("Car not available during requested time");
+      }
 
-        // 5️⃣ Car availability
-        const carAvailability = await client.query(
-          `
-          SELECT 1
-          FROM event e
-          WHERE e.identity_id = $1
-            AND e.event_type = 'car_availability_set'
-            AND (e.payload->>'day_of_week')::int = EXTRACT(DOW FROM $2::timestamptz)
-            AND $3::time >= (e.payload->>'start_time')::time
-            AND $4::time <= (e.payload->>'end_time')::time
-          `,
-          [
-            carId,
-            startTime,
-            startTime.split("T")[1].substring(0, 5),
-            endTime.split("T")[1].substring(0, 5)
-          ]
-        );
+      // 🧠 7 — DAILY LIMIT
+      const dailyCount = await client.query(`
+        SELECT COUNT(*) AS total
+        FROM event e
+        WHERE e.event_type = 'lesson_scheduled'
+          AND e.instructor_id = $1
+          AND DATE(lower(e.lesson_range)) = DATE($2::timestamptz)
+          AND NOT EXISTS (
+            SELECT 1 FROM event c
+            WHERE c.identity_id = e.identity_id
+              AND c.event_type = 'lesson_cancelled'
+          )
+      `, [instructorId, startTime]);
 
-        if (carAvailability.rowCount === 0) {
-          throw new Error("Car not available during requested time");
-        }
+      const lessonCount = parseInt(dailyCount.rows[0].total, 10);
 
-        // 6️⃣ Daily limit
-        const dailyCount = await client.query(
-          `
-          SELECT COUNT(*) AS total
-          FROM event e
-          WHERE e.event_type = 'lesson_scheduled'
-            AND e.instructor_id = $1
-            AND DATE(lower(e.lesson_range)) = DATE($2::timestamptz)
-            AND NOT EXISTS (
-              SELECT 1 FROM event c
-              WHERE c.identity_id = e.identity_id
-                AND c.event_type = 'lesson_cancelled'
-            )
-          `,
-          [instructorId, startTime]
-        );
+      if (lessonCount >= 3) {
+        throw new Error("Instructor daily lesson limit reached");
+      }
 
-        const lessonCount = parseInt(dailyCount.rows[0].total, 10);
-
-        if (lessonCount >= 3) {
-          throw new Error("Instructor daily lesson limit reached");
-        }
-
-        // 7️⃣ Instructor overlap
-        const instructorConflict = await client.query(
-          `
-          SELECT 1
-          FROM event e
-          WHERE e.event_type = 'lesson_scheduled'
-            AND e.instructor_id = $1
-            AND e.lesson_range && tstzrange($2::timestamptz, $3::timestamptz)
-            AND NOT EXISTS (
-              SELECT 1 FROM event c
-              WHERE c.identity_id = e.identity_id
-                AND c.event_type = 'lesson_cancelled'
-            )
-          `,
-          [instructorId, startTime, endTime]
-        );
-
-        if (instructorConflict.rowCount > 0) {
-          throw new Error("Instructor already booked for this time");
-        }
-
-        // 8️⃣ Car overlap
-        const carConflict = await client.query(
-          `
-          SELECT 1
-          FROM event e
-          WHERE e.event_type = 'lesson_scheduled'
-            AND e.car_id = $1
-            AND e.lesson_range && tstzrange($2::timestamptz, $3::timestamptz)
-            AND NOT EXISTS (
-              SELECT 1 FROM event c
-              WHERE c.identity_id = e.identity_id
-                AND c.event_type = 'lesson_cancelled'
-            )
-          `,
-          [carId, startTime, endTime]
-        );
-
-        if (carConflict.rowCount > 0) {
-          throw new Error("Car already booked for this time");
-        }
-
-        // Insert identity
-      await client.query(
-        `INSERT INTO identity (id, identity_type) VALUES ($1, 'lesson')`,
-        [lessonId]
-      );
-
-      // Insert event
-      await client.query(
-        `
-        INSERT INTO event (
-          id,
-          identity_id,
-          event_type,
-          payload,
-          instructor_id,
-          car_id,
-          lesson_range
-        )
-        VALUES (
-          $1,
-          $1,
-          'lesson_scheduled',
-          $2,
-          $3,
-          $4,
-          tstzrange($5::timestamptz, $6::timestamptz)
-        )
-        `,
-        [
-          lessonId,
-          payload,
-          instructorId,
-          carId,
-          startTime,
-          endTime
-        ]
-      );
+      // 🚀 FINAL — CREATE LESSON (SINGLE SOURCE OF TRUTH)
+      const lessonId = await createLesson(client, {
+        student_id: studentId,
+        instructor_id: instructorId,
+        start_time: startTime,
+        end_time: endTime
+      });
 
       return {
         message: "Lesson scheduled successfully",
@@ -261,7 +172,7 @@ if (
     res.status(400).json({ error: err.message });
   }
 }
-         
+
 
 
 export async function cancelLesson(req, res) {

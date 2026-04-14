@@ -4,6 +4,9 @@ import { v4 as uuidv4 } from "uuid";
 import { setInstructorAvailability } from "../services/instructorService.js";
 import express from "express";
 import { emitToInstructor } from "../services/wsService.js";
+import {  findStudentByRequest } from "../services/studentProjectionHelpers.js";
+import { updateStudentState } from "../services/studentProjectionWriter.js";
+import { emitToStudent } from '../services/wsService.js';
 import {
   createStudent,
   activateStudent,
@@ -33,10 +36,15 @@ router.post("/instructor/accept-offer", async (req, res) => {
 
   const { instructor_id, lesson_request_id } = req.body; // ✅ FIXED
 
-  const client = await pool.connect();
+ // const client = await pool.connect();
+    const client = pool;
+
+  console.log("CLIENT OBJECT:", client);
+console.log("TYPE OF CLIENT:", typeof client);
+console.log("HAS QUERY:", client && typeof client.query);
 
   try {
-    await client.query("BEGIN");
+    //await client.query("BEGIN");
 
     // 1️⃣ Check if offer exists
     const offerCheck = await client.query(`
@@ -86,24 +94,60 @@ router.post("/instructor/accept-offer", async (req, res) => {
     ]);
 
     // 4️⃣ CONFIRM EVENT
-    await client.query(`
-      INSERT INTO event (
-        id,
-        identity_id,
-        event_type,
-        instructor_id,
-        payload
-      )
-      VALUES ($1,$2,'lesson_confirmed',$3,$4)
-    `, [
-      uuidv4(),
-      lesson_request_id,
-      instructor_id,
-      JSON.stringify({
-        instructor_id,
-        lesson_request_id
-      })
-    ]);
+    const { rows } = await client.query(`
+  INSERT INTO event (
+    id,
+    identity_id,
+    event_type,
+    instructor_id,
+    payload
+  )
+  VALUES ($1,$2,'lesson_confirmed',$3,$4)
+  RETURNING created_at
+`, [
+  uuidv4(),
+  lesson_request_id,
+  instructor_id,
+  JSON.stringify({
+    instructor_id,
+    lesson_request_id
+  })
+]);
+
+
+// 🔥 REMOVE ALL OTHER OFFERS (CRITICAL)
+await client.query(`
+  DELETE FROM instructor_offers_projection
+  WHERE lesson_request_id = $1
+`, [lesson_request_id]);
+
+const eventTime = rows[0].created_at;
+
+// ✅ STUDENT PROJECTION UPDATE (confirmed)
+const studentId = await findStudentByRequest(client, lesson_request_id);
+
+
+console.log("🔥 CONFIRMED HOOK HIT:", studentId);
+
+if (studentId) {
+  await updateStudentState(client, studentId, {
+    status: 'confirmed',
+    instructor_id: instructor_id,
+    confirmed_at: eventTime,
+
+// 🔥 CLEAN INVALID FUTURE STATES
+  started_at: null,
+  completed_at: null,
+  cancelled_at: null
+  });
+}
+
+if (studentId) {
+  emitToStudent(studentId, {
+    type: "student_update"
+  });
+}
+
 
   // 🥇 5️⃣ CREATE LESSON ENTITY (CLEAN)
 
@@ -135,16 +179,31 @@ router.post("/instructor/accept-offer", async (req, res) => {
       })
     ]);
 
-    await client.query("COMMIT");
 
+   // ✅ STUDENT PROJECTION UPDATE (attach lesson_id)
+console.log("🔥 LESSON_CREATED HOOK HIT:", studentId);
 
-    emitToInstructor(instructor_id, {
-    type: "dashboard_update"
-    });
+if (studentId) {
+  await updateStudentState(client, studentId, {
+    lesson_id: newLessonId
+  });
+
+   //await client.query("COMMIT");
+
+  // 🔥 CRITICAL — EMIT TO STUDENT
+  emitToStudent(studentId, {
+    type: "student_update"
+  });
+}
+
+// ✅ KEEP instructor update
+emitToInstructor(instructor_id, {
+  type: "dashboard_update"
+});
+
 
     console.log("✅ LESSON CONFIRMED:", lesson_request_id);
 
-    await rebuildProjections();
 
     res.json({
       status: "offer_accepted",
@@ -152,11 +211,11 @@ router.post("/instructor/accept-offer", async (req, res) => {
     });
 
   } catch (err) {
-    await client.query("ROLLBACK");
+   // await client.query("ROLLBACK");
     console.error("❌ ACCEPT ERROR:", err);
     res.status(500).json({ error: err.message });
   } finally {
-    client.release();
+   // client.release();
   }
 });
 

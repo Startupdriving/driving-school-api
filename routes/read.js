@@ -2,11 +2,91 @@ import { simulateDispatchRequests } from "../services/dispatchSimulationService.
 import { rebuildProjections } from "../services/projectionRebuildService.js";
 import { getInstructorDailySchedule } from "../services/instructorService.js";
 import express from "express";
+import db from '../db.js';
 import pool from "../db.js";
 import crypto from "crypto"
 import { validate as isUUID } from "uuid";
+import { findStudentByRequest, findStudentByLesson } from '../services/studentProjectionHelpers.js';
+import { upsertStudentState } from '../services/studentProjectionWriter.js';
+import { getInstructorSchedule } from "../services/instructorScheduleService.js";
+
 
 const router = express.Router();
+
+
+router.get("/student/active-lesson", async (req, res) => {
+
+  const { student_id } = req.query;
+
+  if (!student_id) {
+    return res.status(400).json({
+      error: "student_id required"
+    });
+  }
+
+  try {
+    const result = await db.query(`
+      SELECT
+        student_id,
+        lesson_request_id,
+        lesson_id,
+        status,
+        instructor_id,
+        requested_at,
+        confirmed_at,
+        started_at,
+        completed_at,
+        cancelled_at
+      FROM student_active_lesson_projection
+      WHERE student_id = $1
+      LIMIT 1
+    `, [student_id]);
+
+    if (result.rows.length === 0) {
+      return res.json(null);
+    }
+
+    res.json(result.rows[0]);
+
+  } catch (err) {
+    console.error("READ ERROR:", err);
+    res.status(500).json({ error: "failed_to_fetch_active_lesson" });
+  }
+});
+
+
+
+router.get('/debug/test-student-upsert', async (req, res) => {
+
+  await upsertStudentState(db, {
+    student_id: '11111111-1111-1111-1111-111111111111',
+    lesson_request_id: '22222222-2222-2222-2222-222222222222',
+    status: 'searching',
+    requested_at: new Date()
+  });
+
+  const result = await db.query(`
+    SELECT * FROM student_active_lesson_projection
+    WHERE student_id = '11111111-1111-1111-1111-111111111111'
+  `);
+
+  res.json(result.rows[0]);
+});
+
+
+router.get('/debug/student-bridge', async (req, res) => {
+  const requestId = req.query.request_id;
+  const lessonId = req.query.lesson_id;
+
+  const studentFromRequest = await findStudentByRequest(db, requestId);
+  const studentFromLesson = await findStudentByLesson(db, lessonId);
+
+  res.json({
+    studentFromRequest,
+    studentFromLesson
+  });
+});
+
 
 router.get("/instructor/:id/schedule", getInstructorDailySchedule);
 
@@ -376,39 +456,44 @@ console.log("Instructor dashboard route loaded");
 
 
 router.get("/instructor-dashboard/:id", async (req, res) => {
-
   const { id } = req.params;
 
   try {
-
-    // 🔹 ACTIVE LESSON (REAL lesson_id)
     const activeLessonRes = await pool.query(`
       SELECT e.identity_id AS lesson_id,
              (e.payload->>'lesson_request_id')::uuid AS lesson_request_id
       FROM event e
       WHERE e.event_type = 'lesson_created'
-      AND e.instructor_id = $1
-      AND NOT EXISTS (
-        SELECT 1 FROM event e2
-        WHERE e2.identity_id = e.identity_id
-        AND e2.event_type IN ('lesson_completed','lesson_cancelled')
-      )
+        AND e.instructor_id = $1
+        AND NOT EXISTS (
+          SELECT 1
+          FROM event e2
+          WHERE e2.identity_id = e.identity_id
+            AND e2.event_type IN ('lesson_completed', 'lesson_cancelled')
+        )
       LIMIT 1
     `, [id]);
 
     const activeLesson = activeLessonRes.rows[0] || null;
 
-    // 🔹 OFFERS
     const offersRes = await pool.query(`
-      SELECT *
-      FROM instructor_offers_projection
-      WHERE instructor_id = $1
-      ORDER BY created_at DESC
+      SELECT p.*
+      FROM instructor_offers_projection p
+      WHERE p.instructor_id = $1
+        AND NOT EXISTS (
+          SELECT 1
+          FROM event e
+          WHERE e.identity_id = p.lesson_request_id
+            AND e.event_type IN (
+              'lesson_confirmed',
+              'lesson_request_expired'
+            )
+        )
+      ORDER BY p.created_at DESC
     `, [id]);
 
     const offers = offersRes.rows;
 
-    // 🔹 STATUS LOGIC
     let status = "idle";
 
     if (activeLesson) {
@@ -423,12 +508,10 @@ router.get("/instructor-dashboard/:id", async (req, res) => {
       active_lesson: activeLesson,
       offers
     });
-
   } catch (err) {
     console.error("DASHBOARD ERROR:", err);
     res.status(500).json({ error: "dashboard_failed" });
   }
-
 });
 
 
@@ -856,6 +939,32 @@ router.get("/instructor-active-lesson/:id", async (req, res) => {
 
   res.json(result.rows[0] || null);
 });
+
+
+router.get("/instructor/schedule", async (req, res) => {
+
+  const { instructor_id } = req.query;
+
+  if (!instructor_id) {
+    return res.status(400).json({ error: "instructor_id required" });
+  }
+
+  try {
+
+    const data = await getInstructorSchedule(instructor_id);
+
+    console.log("📡 INSTRUCTOR SCHEDULE RESPONSE:", data);
+
+    res.json(data);
+
+  } catch (err) {
+
+    console.error("SCHEDULE ERROR:", err);
+
+    res.status(500).json({ error: "internal_error" });
+  }
+});
+
 
 
 export default router;

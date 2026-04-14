@@ -3,6 +3,9 @@ import { sendNextWaveOffers } from "./dispatchWorker.js";
 import { v4 as uuidv4 } from "uuid";
 import { withIdempotency } from "./idempotencyService.js";
 import crypto from "crypto";
+import { upsertStudentState } from '../services/studentProjectionWriter.js';
+
+
 
 function generateUUID() {
   return crypto.randomUUID();
@@ -106,6 +109,96 @@ console.log("INSERT lesson_requested event");
   ]
 );
 
+
+// 🧠 NEGOTIATION PROJECTION INSERT (FIRST STATE)
+
+console.log("🔥 NEGOTIATION HOOK FILE HIT");
+
+const existingNegotiation = await client.query(`
+  SELECT 1
+  FROM lesson_negotiation_projection
+  WHERE lesson_request_id = $1
+`, [requestId]);
+
+if (existingNegotiation.rowCount === 0) {
+
+  console.log("🧠 CREATE NEGOTIATION STATE:", requestId);
+
+  await client.query(`
+    INSERT INTO lesson_negotiation_projection (
+      lesson_request_id,
+      student_id,
+      status,
+      last_response_by,
+      original_start_time,
+      original_end_time,
+      proposed_start_time,
+      proposed_end_time,
+      response_count,
+      created_at,
+      updated_at
+    )
+    VALUES (
+      $1, $2,
+      'pending',
+      'student',
+      $3, $4,
+      $3, $4,
+      0,
+      NOW(),
+      NOW()
+    )
+  `, [
+    requestId,
+    student_id,
+    requested_start_time,
+    requested_end_time
+  ]);
+
+} else {
+  console.log("⛔ NEGOTIATION ALREADY EXISTS — SKIP");
+}
+
+
+// ✅ 2️⃣ STUDENT PROJECTION UPDATE (SAME TRANSACTION)
+// 🔥 ONLY RESET IF NO ACTIVE/CONFIRMED LESSON
+const existing = await client.query(`
+  SELECT status
+  FROM student_active_lesson_projection
+  WHERE student_id = $1
+`, [student_id]);
+
+// 🔥 STRICT STATE MACHINE ENFORCEMENT
+
+const existingState = existing.rows[0];
+
+if (
+  existingState &&
+  !['completed', 'cancelled'].includes(existingState.status) &&
+  existingState.lesson_id // only block if real lesson exists
+) {
+  throw new Error("Active lesson already exists");
+}
+
+
+
+// 🧠 STEP 2 — THEN RESET
+await upsertStudentState(client, {
+  student_id,
+  lesson_request_id: requestId,
+  status: 'searching',
+  requested_at: new Date(),
+  lesson_id: null,
+  instructor_id: null,
+  confirmed_at: null,
+  started_at: null,
+  completed_at: null,
+  cancelled_at: null
+});
+
+console.log("🔥 RESET STUDENT STATE:", student_id);
+
+
       await sendNextWaveOffers(client, requestId, 1);
       return {
         message: "Lesson request created and offers dispatched",
@@ -113,8 +206,6 @@ console.log("INSERT lesson_requested event");
       };
 
     });
-
-    await rebuildProjections();
 
     res.status(201).json(response);
 
@@ -316,6 +407,20 @@ export async function acceptOffer(req, res) {
           JSON.stringify({ wave: currentWave })
         ]
       );
+
+
+// ✅ STUDENT PROJECTION UPDATE (confirmed)
+
+const studentId = await findStudentByRequest(requestId);
+
+if (studentId) {
+  await updateStudentState(client, studentId, {
+    status: 'confirmed',
+    instructor_id: instructorId,
+    confirmed_at: new Date()
+  });
+}
+
 
 // 🔥 Update fairness projection for confirmation
 console.log("🔥 INSERT 331 HIT");

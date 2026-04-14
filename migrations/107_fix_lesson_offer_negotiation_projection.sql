@@ -1,0 +1,3 @@
+ALTER TABLE lesson_offer_negotiation_projection
+ADD CONSTRAINT unique_offer_per_instructor
+UNIQUE (lesson_request_id, instructor_id);

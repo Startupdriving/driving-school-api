@@ -1,40 +1,50 @@
-const clients = new Map();
+const clients = new Map(); // key → ws
 
-// ✅ register
-export function registerClient(instructor_id, ws) {
-  clients.set(instructor_id, ws);
+// 🔵 REGISTER
+function registerClient(id, ws) {
+
+console.log("🟢 REGISTER CLIENT:", id);
+
+  clients.set(id, ws);
 }
 
-// ✅ remove
-export function removeClient(ws) {
+// 🔴 REMOVE
+function removeClient(ws) {
   for (const [id, client] of clients.entries()) {
     if (client === ws) {
       clients.delete(id);
-      console.log("WS DISCONNECT:", id);
-      break;
     }
   }
 }
 
-// ✅ emit
-export function emitToInstructor(instructor_id, payload) {
+// 🟢 EMIT TO STUDENT
+function emitToStudent(student_id, data) {
+  const client = clients.get(student_id);
 
-  const ws = clients.get(instructor_id);
-
-  if (!ws) {
-    console.log("❌ WS NOT FOUND:", instructor_id);
-    return;
-  }
-
-  if (ws.readyState !== 1) {
-    console.log("❌ WS NOT OPEN:", instructor_id);
-    return;
-  }
-
-  try {
-    ws.send(JSON.stringify(payload));
-    console.log("📡 WS SENT →", instructor_id, payload);
-  } catch (err) {
-    console.error("❌ WS SEND ERROR:", err.message);
+  if (client) {
+    client.send(JSON.stringify(data));
   }
 }
+
+// 🟢 EXISTING
+function emitToInstructor(instructor_id, data) {
+
+
+// 🔥 DEBUG LOGS (ADD HERE)
+  console.log("📡 EMIT TO:", instructor_id);
+  console.log("📡 CLIENT EXISTS:", clients.has(instructor_id));
+
+
+  const client = clients.get(instructor_id);
+
+  if (client) {
+    client.send(JSON.stringify(data));
+  }
+}
+
+export {
+  registerClient,
+  removeClient,
+  emitToInstructor,
+  emitToStudent
+};

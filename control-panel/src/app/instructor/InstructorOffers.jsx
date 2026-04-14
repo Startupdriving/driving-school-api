@@ -130,32 +130,32 @@ const fetchDashboard = async () => {
 
 useEffect(() => {
 
-  const interval = setInterval(() => {
-    fetchDashboard();
-  }, 5000);
-
-
   if (wsRef.current) return; // 🛑 prevent duplicate
 
-  const ws = new WebSocket("ws://localhost:5173");
+  const ws = new WebSocket(
+  `ws://localhost:5173?instructor_id=${instructorId}`
+);
 
   wsRef.current = ws;
 
   ws.onopen = () => {
     console.log("WS CONNECTED");
 
-    ws.send(JSON.stringify({
-      type: "register",
-      instructor_id: instructorId
-    }));
   };
 
   ws.onmessage = (event) => {
-    const data = JSON.parse(event.data);
+ 
+console.log("🔥 RAW WS MESSAGE:", event.data); 
+
+   const data = JSON.parse(event.data);
 
     console.log("WS EVENT:", data);
 
     if (data.type === "new_offer" || data.type === "dashboard_update") {
+ 
+
+   console.log("🔄 FETCH DASHBOARD CALLED");
+
       fetchDashboard();
     }
   };

@@ -3,7 +3,9 @@ import { resolveZone } from "./zoneResolver.js";
 import { v4 as uuidv4 } from "uuid";
 import { emitToInstructor } from "./wsService.js";
 import { rebuildProjections } from "./projectionRebuildService.js";
-
+import { findStudentByRequest } from '../services/studentProjectionHelpers.js';
+import { updateStudentState } from '../services/studentProjectionWriter.js';
+import { insertEvent } from "./eventStore.js";
 
 const MAX_ACTIVE_OFFERS_PER_INSTRUCTOR = 3;
 const MAX_WAVES = 3;
@@ -83,20 +85,15 @@ async function handleExpiredWave(client, requestId, currentWave) {
 
   // 1️⃣ Append wave_completed
 console.log("🔥 INSERT 83 HIT");
-  await client.query(
-    `
-    INSERT INTO event (id, identity_id, event_type, payload)
-    VALUES ($1, $2, 'lesson_request_wave_completed', $3)
-    `,
-    [
-      uuidv4(),
-      requestId,
-      JSON.stringify({
-        wave: currentWave,
-        reason: "timeout"
-      })
-    ]
-  );
+  await insertEvent(client, {
+  id: uuidv4(),
+  identity_id: requestId,
+  event_type: "lesson_request_wave_completed",
+  payload: {
+    wave: currentWave,
+    reason: "timeout"
+  }
+});
 
   // 2️⃣ Count how many waves already started
   const { rows } = await client.query(
@@ -114,19 +111,14 @@ console.log("🔥 INSERT 83 HIT");
   if (waveCount >= MAX_WAVES) {
     // Expire due to max waves
 console.log("🔥 INSERT 113 HIT");
-    await client.query(
-      `
-      INSERT INTO event (id, identity_id, event_type, payload)
-      VALUES ($1, $2, 'lesson_request_expired', $3)
-      `,
-      [
-        uuidv4(),
-        requestId,
-        JSON.stringify({
-          reason: "no_instructor_accepted"
-        })
-      ]
-    );
+    await insertEvent(client, {
+  id: uuidv4(),
+  identity_id: requestId,
+  event_type: "lesson_request_expired",
+  payload: {
+    reason: "no_instructor_accepted"
+  }
+});
 
     return;
   }
@@ -149,19 +141,39 @@ console.log("🔥 INSERT 113 HIT");
 // =======================================================
 export async function sendNextWaveOffers(client, requestId, wave) {
 
+
   console.log("🚀 DISPATCH START", { requestId, wave });
+
+
+  // 🛑 STOP DISPATCH IF ALREADY ACCEPTED
+
+const acceptedCheck = await client.query(`
+  SELECT 1
+  FROM lesson_offer_negotiation_projection
+  WHERE lesson_request_id = $1
+    AND status = 'accepted'
+  LIMIT 1
+`, [requestId]);
+
+if (acceptedCheck.rows.length > 0) {
+  console.log("🛑 STOP DISPATCH — already accepted:", requestId);
+  return;
+}
+
 
   // 🔥 STEP 1 — Fetch request data ONCE
   const { rows } = await client.query(`
-    SELECT
-      payload->>'zone_id' AS zone_id,
-      payload->>'student_id' AS student_id
-    FROM event
-    WHERE identity_id = $1
-    AND event_type = 'lesson_requested'
-    ORDER BY created_at ASC
-    LIMIT 1
-  `, [requestId]);
+  SELECT
+    payload->>'zone_id' AS zone_id,
+    payload->>'student_id' AS student_id,
+    payload->>'requested_start_time' AS requested_start_time,
+    payload->>'requested_end_time' AS requested_end_time
+  FROM event
+  WHERE identity_id = $1
+  AND event_type = 'lesson_requested'
+  ORDER BY created_at ASC
+  LIMIT 1
+`, [requestId]);
 
   if (!rows.length) {
     console.log("❌ No lesson_requested event found");
@@ -170,6 +182,8 @@ export async function sendNextWaveOffers(client, requestId, wave) {
 
   const zoneId = Number(rows[0].zone_id);
   const studentId = rows[0].student_id || null;
+  const requested_start_time = rows[0].requested_start_time;
+  const requested_end_time = rows[0].requested_end_time;
 
   console.log("📍 DISPATCH ZONE:", zoneId);
 
@@ -241,7 +255,7 @@ if (confirmed.rows.length > 0) {
 }
 
   // 🔥 STEP 5 — Candidate selection
-
+/*
   const { rows: candidates } = await client.query(
     `
 SELECT
@@ -308,6 +322,17 @@ LIMIT $2
     ]
   );
 
+*/
+
+// 🧪 TEMP BYPASS — IGNORE FILTERS
+const { rows: candidates } = await client.query(`
+  SELECT instructor_id
+  FROM current_instructor_runtime_state
+  WHERE runtime_state = 'instructor_online'
+`);
+
+console.log("🧪 BYPASS CANDIDATES:", candidates);
+
 
 console.log("🔥 SIMPLE CANDIDATES:", candidates);
 console.log("🔥 CANDIDATE COUNT:", candidates.length);
@@ -317,64 +342,133 @@ console.log("🔥 CANDIDATE COUNT:", candidates.length);
     console.log("❌ No instructors available");
     console.log("🔥 INSERT 297 HIT");
 
-    await client.query(`
-      INSERT INTO event (id, identity_id, event_type, payload)
-      VALUES ($1, $2, 'lesson_request_expired', $3)
-    `, [
-      uuidv4(),
-      requestId,
-      JSON.stringify({ reason: "no_available_instructors" })
-    ]);
+     const eventId = uuidv4();
+
+await insertEvent(client, {
+  id: eventId,
+  identity_id: requestId,
+  event_type: "lesson_request_expired",
+  payload: {
+    reason: "no_available_instructors"
+  }
+});
+
+   const eventTime = new Date(); // temporary replacement
 
     return;
   }
+
+
+
+
 
   // 🔥 STEP 7 — Start dispatch wave
   const expiresAt = new Date(Date.now() + WAVE_TIMEOUT_SECONDS * 1000);
  console.log("🔥 INSERT 312 HIT");
  
-  await client.query(`
-    INSERT INTO event (id, identity_id, event_type, payload)
-    VALUES ($1, $2, 'lesson_request_dispatch_started', $3)
-  `, [
-    uuidv4(),
-    requestId,
-    JSON.stringify({
-      wave,
-      expires_at: expiresAt,
-      wave_size: dynamicWaveSize
-    })
-  ]);
+await insertEvent(client, {
+  id: uuidv4(),
+  identity_id: requestId,
+  event_type: "lesson_request_dispatch_started",
+  payload: {
+    wave,
+    expires_at: expiresAt,
+    wave_size: dynamicWaveSize
+  }
+});
 
   // 🔥 STEP 8 — Send offers
   for (const instructor of candidates) {
     console.log("🔥 INSERT 331 HIT");
 
     const instructorId = instructor.instructor_id;
-    console.log("INSTRUCTOR DEBUG:", instructor);
+ 
+    const offerId = uuidv4();
+
+    await client.query(`
+  INSERT INTO identity (id, identity_type)
+  VALUES ($1, 'lesson_offer')
+`, [offerId]);
+
+   console.log("INSTRUCTOR DEBUG:", instructor);
 
     try {
     console.log("🔥 INSERT 339 HIT");
 
-      await client.query(`
-  INSERT INTO event (
-    id,
-    identity_id,
-    event_type,
-    instructor_id,   -- ⭐ ADD THIS
-    payload
+      await insertEvent(client, {
+  id: uuidv4(),
+  identity_id: offerId,
+  event_type: "lesson_offer_sent",
+  payload: {
+    offer_id: offerId,
+    lesson_request_id: requestId,
+    instructor_id: instructorId,
+    wave: wave
+  },
+  instructor_id: instructorId
+});
+
+
+await client.query(`
+  INSERT INTO instructor_offers_projection (
+    instructor_id,
+    lesson_request_id,
+    status,
+    created_at
   )
-  VALUES ($1, $2, 'lesson_offer_sent', $3, $4)
+  VALUES ($1, $2, 'pending', NOW())
+  ON CONFLICT DO NOTHING
 `, [
-  uuidv4(),
+  instructorId,
+  requestId
+]);
+
+
+
+// 🧠 OFFER NEGOTIATION INSERT
+
+const existingOffer = await client.query(`
+  SELECT 1
+  FROM lesson_offer_negotiation_projection
+  WHERE offer_id = $1
+`, [offerId]);
+
+if (existingOffer.rowCount === 0) {
+
+  console.log("📦 CREATE OFFER NEGOTIATION:", offerId);
+}
+
+  const result = await client.query(`
+  INSERT INTO lesson_offer_negotiation_projection (
+    offer_id,
+    lesson_request_id,
+    instructor_id,
+    student_id,
+    status,
+    last_response_by,
+    original_start_time,
+    original_end_time,
+    proposed_start_time,
+    proposed_end_time,
+    created_at,
+    updated_at
+  )
+  VALUES ($1,$2,$3,$4,'sent','student',$5,$6,$5,$6,NOW(),NOW())
+  ON CONFLICT (lesson_request_id, instructor_id)
+  DO NOTHING
+`, [
+  offerId,
   requestId,
-  instructor.instructor_id,   // ⭐ CRITICAL
-  JSON.stringify({
-  instructor_id: instructor.instructor_id,
-  lesson_request_id: requestId,
-  wave: wave
-})
-])
+  instructorId,
+  studentId,
+  requested_start_time,
+  requested_end_time
+]);
+
+if (result.rowCount === 0) {
+  console.log("⛔ OFFER ALREADY EXISTS — SKIP", instructorId);
+}
+
 
      console.log("INSTRUCTOR OBJECT:", instructor)
       console.log("✅ Offer sent →", instructorId);
@@ -385,6 +479,7 @@ console.log("🔥 CANDIDATE COUNT:", candidates.length);
 
 
     } catch (err) {
+     
       console.error("❌ Offer failed:", err.message);
     }
   }

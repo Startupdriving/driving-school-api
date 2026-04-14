@@ -1,14 +1,12 @@
 import { rebuildProjections } from "../services/projectionRebuildService.js";
 import express from "express";
+import db from '../db.js';
 import pool from "../db.js";
-import { emitToInstructor } from "../services/wsService.js";
+import { emitToInstructor, emitToStudent } from "../services/wsService.js";
 import { v4 as uuidv4 } from "uuid";
-import {
-  scheduleLesson,
-  cancelLesson,
-  completeLesson,
-  rescheduleLesson
-} from "../services/lessonService.js";
+import { findStudentByLesson } from '../services/studentProjectionHelpers.js';
+import { updateStudentState } from '../services/studentProjectionWriter.js';
+import { scheduleLesson, cancelLesson, completeLesson, rescheduleLesson } from "../services/lessonService.js";
 
 
 const router = express.Router();
@@ -75,8 +73,32 @@ router.post("/start", async (req, res) => {
       throw new Error("lesson_already_started");
     }
 
-    // STEP 4 — INSERT START EVENT
-    await client.query(`
+
+// 🚨 STEP 3.5 — GLOBAL ACTIVE LESSON LOCK (PROJECTION-BASED)
+
+console.log("🔒 CHECKING ACTIVE LESSON LOCK");
+
+const activeLesson = await client.query(`
+  SELECT 1
+  FROM lesson_schedule_projection
+  WHERE instructor_id = $1
+    AND status = 'started'
+  LIMIT 1
+`, [instructor_id]);
+
+console.log("🔍 ACTIVE LESSON RESULT:", activeLesson.rows);
+
+if (activeLesson.rowCount > 0) {
+  console.log("⛔ ACTIVE LESSON LOCK BLOCKED", {
+    instructor_id
+  });
+
+  throw new Error("Instructor already has an active lesson");
+}
+
+
+    // STEP 4 — INSERT START EVENT (WITH DB TIME)
+const { rows } = await client.query(`
   INSERT INTO event (
     id,
     identity_id,
@@ -85,6 +107,7 @@ router.post("/start", async (req, res) => {
     payload
   )
   VALUES ($1,$2,'lesson_started',$3,$4)
+  RETURNING created_at
 `, [
   uuidv4(),
   lesson_id,
@@ -94,17 +117,43 @@ router.post("/start", async (req, res) => {
   })
 ]);
 
+const eventTime = rows[0].created_at;
 
+
+// 🧠 UPDATE SCHEDULE PROJECTION → started
+
+await client.query(`
+  UPDATE lesson_schedule_projection
+  SET status = 'started',
+      updated_at = NOW()
+  WHERE lesson_request_id = $1
+`, [lesson_id]);
+
+console.log("✅ SCHEDULE STATUS → STARTED:", lesson_id);
+
+
+// ✅ STUDENT PROJECTION UPDATE (started)
+const studentId = await findStudentByLesson(client, lesson_id);
+
+console.log("🔥 STARTED HOOK:", studentId);
+
+if (studentId) {
+  await updateStudentState(client, studentId, {
+    status: 'started',
+    started_at: eventTime,
+ // 🔥 CLEAN INVALID FIELDS
+    completed_at: null,
+    cancelled_at: null
+  });
+}
 
     await client.query("COMMIT");
 
-
+    emitToStudent(studentId, { type: "student_update" });
 
     emitToInstructor(instructor_id, {
     type: "dashboard_update"
     });
-
-    rebuildProjections().catch(console.error);
 
     res.json({ status: "lesson_started" });
 
@@ -169,28 +218,59 @@ router.post("/complete", async (req, res) => {
       throw new Error("lesson_already_completed");
     }
 
-    await client.query(`
-      INSERT INTO event (
-        id,
-        identity_id,
-        event_type,
-        instructor_id
-      )
-      VALUES ($1,$2,'lesson_completed',$3)
-    `,[
-      uuidv4(),
-      lesson_id,
-      instructor_id
-    ]);
+
+     const { rows: insertRows } = await client.query(`
+  INSERT INTO event (
+    id,
+    identity_id,
+    event_type,
+    instructor_id,
+    payload
+  )
+  VALUES ($1,$2,'lesson_completed',$3,$4)
+  RETURNING created_at
+`, [
+  uuidv4(),
+  lesson_id,
+  instructor_id,
+  JSON.stringify({ lesson_id })
+]);
+
+     const eventTime = insertRows[0].created_at;
+
+
+
+await client.query(`
+  UPDATE lesson_schedule_projection
+  SET status = 'completed',
+      updated_at = NOW()
+  WHERE lesson_request_id = $1
+`, [lesson_id]);
+
+console.log("✅ SCHEDULE STATUS → COMPLETED:", lesson_id);
+
+
+
+    const studentId = await findStudentByLesson(client, lesson_id);
+
+     if (studentId) {
+     await updateStudentState(client, studentId, {
+     status: 'completed',
+     completed_at: eventTime,
+     cancelled_at: null
+     });
+     }
+
 
     await client.query("COMMIT");
+
+   emitToStudent(studentId, { type: "student_update" });
 
 
    emitToInstructor(instructor_id, {
    type: "dashboard_update"
    });
 
-    await rebuildProjections();
 
     res.json({
       status: "lesson_completed"
@@ -262,31 +342,61 @@ router.post("/cancel", async (req, res) => {
     }
 
     // ✅ Insert cancel event
-    await client.query(`
-      INSERT INTO event (
-        id,
-        identity_id,
-        event_type,
-        instructor_id
-      )
-      VALUES ($1,$2,'lesson_cancelled',$3)
-    `, [
-      uuidv4(),
-      lesson_id,
-      instructor_id
-    ]);
+ const { rows: cancelRows } = await client.query(`
+  INSERT INTO event (
+    id,
+    identity_id,
+    event_type,
+    instructor_id,
+    payload
+  )
+  VALUES ($1,$2,'lesson_cancelled',$3,$4)
+  RETURNING created_at
+`, [
+  uuidv4(),
+  lesson_id,
+  instructor_id,
+  JSON.stringify({ lesson_id })
+]);
+
+const eventTime = cancelRows[0].created_at;
+
+
+await client.query(`
+  UPDATE lesson_schedule_projection
+  SET status = 'cancelled',
+      updated_at = NOW()
+  WHERE lesson_request_id = $1
+`, [lesson_id]);
+
+
+
+  // ✅ STUDENT PROJECTION UPDATE (cancelled)
+const studentId = await findStudentByLesson(client, lesson_id);
+
+console.log("🔥 CANCELLED HOOK:", studentId);
+
+if (studentId) {
+  await updateStudentState(client, studentId, {
+  status: 'cancelled',
+  cancelled_at: eventTime,
+
+  // 🔥 CLEAR OLD EXECUTION DATA
+  started_at: null,
+  completed_at: null
+});
+}
 
 
 
     await client.query("COMMIT");
 
 
+    emitToStudent(studentId, { type: "student_update" });
+
     emitToInstructor(instructor_id, {
     type: "dashboard_update"
     });
-
-
-    await rebuildProjections();
 
     res.json({
       status: "lesson_cancelled"
