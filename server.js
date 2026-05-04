@@ -15,6 +15,8 @@ import cors from "cors";
 import dotenv from "dotenv";
 import readRoutes from "./routes/read.js";
 import writeRoutes from "./routes/write.js";
+import adminRoutes from "./routes/admin.js";
+import rescheduleRoutes from "./routes/reschedule.js";
 import { WebSocketServer } from "ws";
 import { registerClient, removeClient } from "./services/wsService.js";
 import http from "http";
@@ -45,6 +47,9 @@ app.use("/write/lesson", lessonRoutes);
 app.use("/write/lesson-request", lessonRequestRoutes);
 app.use("/write/payment", paymentRoutes);
 app.use("/write/offer", offerRoutes);
+app.use("/write/reschedule", rescheduleRoutes);
+
+app.use("/admin", adminRoutes);
 
 
 const PORT = process.env.PORT || 5173;

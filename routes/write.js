@@ -12,6 +12,9 @@ import {
   activateStudent,
   deactivateStudent
 } from "../services/studentService.js";
+import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
+
 
 const router = express.Router();
 
@@ -19,6 +22,177 @@ router.post("/student/create", createStudent);
 router.post("/student/activate", activateStudent);
 router.post("/student/deactivate", deactivateStudent);
 router.post("/instructor/availability", setInstructorAvailability);
+
+
+router.post("/student/signup", async (req, res) => {
+  try {
+    const {
+      full_name,
+      mobile_number,
+      age,
+      city,
+      preferred_language,
+      password
+    } = req.body;
+
+    if (!full_name || !mobile_number || !password) {
+      return res.status(400).json({
+        error: "name_mobile_password_required"
+      });
+    }
+
+    const exists = await pool.query(
+      `
+      SELECT 1
+      FROM students
+      WHERE mobile_number = $1
+      LIMIT 1
+      `,
+      [mobile_number]
+    );
+
+    if (exists.rows.length > 0) {
+      return res.status(400).json({
+        error: "mobile_exists"
+      });
+    }
+
+    const password_hash = await bcrypt.hash(password, 10);
+
+    const result = await pool.query(
+  `
+  INSERT INTO students (
+    full_name,
+    mobile_number,
+    age,
+    city,
+    preferred_language,
+    password_hash,
+    status,
+    is_verified
+  )
+  VALUES ($1,$2,$3,$4,$5,$6,'active',true)
+  RETURNING
+    id,
+    full_name,
+    mobile_number
+  `,
+  [
+    full_name,
+    mobile_number,
+    age || null,
+    city || null,
+    preferred_language || null,
+    password_hash
+  ]
+);
+
+    res.json({
+      status: "signup_success",
+      student: result.rows[0]
+    });
+
+  } catch (err) {
+    console.error("STUDENT SIGNUP ERROR:", err);
+
+    res.status(500).json({
+      error: "signup_failed"
+    });
+  }
+});
+
+
+
+router.post("/student/login", async (req, res) => {
+  try {
+    const {
+      mobile_number,
+      password
+    } = req.body;
+
+    if (!mobile_number || !password) {
+      return res.status(400).json({
+        error: "mobile_and_password_required"
+      });
+    }
+
+    const result = await pool.query(
+      `
+      SELECT
+        id,
+        full_name,
+        mobile_number,
+        password_hash,
+        status
+      FROM students
+      WHERE mobile_number = $1
+      LIMIT 1
+      `,
+      [mobile_number]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(401).json({
+        error: "invalid_credentials"
+      });
+    }
+
+    const student = result.rows[0];
+
+    const passwordOk = await bcrypt.compare(
+      password,
+      student.password_hash
+    );
+
+    if (!passwordOk) {
+      return res.status(401).json({
+        error: "invalid_credentials"
+      });
+    }
+
+    if (
+      student.status &&
+      student.status !== "active"
+    ) {
+      return res.status(403).json({
+        error: "account_inactive"
+      });
+    }
+
+    const token = jwt.sign(
+      {
+        student_id: student.id,
+        role: "student"
+      },
+      process.env.JWT_SECRET,
+      {
+        expiresIn: "7d"
+      }
+    );
+
+    res.json({
+      status: "ok",
+      token,
+      student: {
+        id: student.id,
+        full_name: student.full_name,
+        mobile_number: student.mobile_number
+      }
+    });
+
+  } catch (err) {
+    console.error(
+      "STUDENT LOGIN ERROR:",
+      err
+    );
+
+    res.status(500).json({
+      error: "login_failed"
+    });
+  }
+});
+
+
 
 router.post("/admin/rebuild-projections", async (req, res) => {
   console.log("🔥 REBUILD ROUTE HIT")
@@ -33,47 +207,46 @@ router.post("/admin/rebuild-projections", async (req, res) => {
 
 
 router.post("/instructor/accept-offer", async (req, res) => {
+  const { instructor_id, lesson_request_id } = req.body;
 
-  const { instructor_id, lesson_request_id } = req.body; // ✅ FIXED
+  if (!instructor_id || !lesson_request_id) {
+    return res.status(400).json({
+      error: "missing_fields"
+    });
+  }
 
- // const client = await pool.connect();
-    const client = pool;
-
-  console.log("CLIENT OBJECT:", client);
-console.log("TYPE OF CLIENT:", typeof client);
-console.log("HAS QUERY:", client && typeof client.query);
+  const client = await pool.connect();
 
   try {
-    //await client.query("BEGIN");
+    await client.query("BEGIN");
 
-    // 1️⃣ Check if offer exists
+    // 1. Offer must exist
     const offerCheck = await client.query(`
-      SELECT *
+      SELECT 1
       FROM instructor_offers_projection
       WHERE instructor_id = $1
-      AND lesson_request_id = $2
+        AND lesson_request_id = $2
+      LIMIT 1
     `, [instructor_id, lesson_request_id]);
 
-    if (offerCheck.rows.length === 0) {
+    if (offerCheck.rowCount === 0) {
       throw new Error("offer_not_found");
     }
 
-    // 2️⃣ LOCK CHECK
+    // 2. Prevent double confirm
     const alreadyConfirmed = await client.query(`
       SELECT 1
       FROM event
       WHERE identity_id = $1
-      AND event_type = 'lesson_confirmed'
+        AND event_type = 'lesson_confirmed'
       LIMIT 1
     `, [lesson_request_id]);
 
-    if (alreadyConfirmed.rows.length > 0) {
-      return res.status(400).json({
-        error: "Lesson already confirmed by another instructor"
-      });
+    if (alreadyConfirmed.rowCount > 0) {
+      throw new Error("lesson_already_confirmed");
     }
 
-    // 3️⃣ ACCEPT EVENT
+    // 3. Accept event
     await client.query(`
       INSERT INTO event (
         id,
@@ -93,73 +266,38 @@ console.log("HAS QUERY:", client && typeof client.query);
       })
     ]);
 
-    // 4️⃣ CONFIRM EVENT
-    const { rows } = await client.query(`
-  INSERT INTO event (
-    id,
-    identity_id,
-    event_type,
-    instructor_id,
-    payload
-  )
-  VALUES ($1,$2,'lesson_confirmed',$3,$4)
-  RETURNING created_at
-`, [
-  uuidv4(),
-  lesson_request_id,
-  instructor_id,
-  JSON.stringify({
-    instructor_id,
-    lesson_request_id
-  })
-]);
+    // 4. Confirm event
+    const confirmRes = await client.query(`
+      INSERT INTO event (
+        id,
+        identity_id,
+        event_type,
+        instructor_id,
+        payload
+      )
+      VALUES ($1,$2,'lesson_confirmed',$3,$4)
+      RETURNING created_at
+    `, [
+      uuidv4(),
+      lesson_request_id,
+      instructor_id,
+      JSON.stringify({
+        instructor_id,
+        lesson_request_id
+      })
+    ]);
 
+    const confirmedAt = confirmRes.rows[0].created_at;
 
-// 🔥 REMOVE ALL OTHER OFFERS (CRITICAL)
-await client.query(`
-  DELETE FROM instructor_offers_projection
-  WHERE lesson_request_id = $1
-`, [lesson_request_id]);
-
-const eventTime = rows[0].created_at;
-
-// ✅ STUDENT PROJECTION UPDATE (confirmed)
-const studentId = await findStudentByRequest(client, lesson_request_id);
-
-
-console.log("🔥 CONFIRMED HOOK HIT:", studentId);
-
-if (studentId) {
-  await updateStudentState(client, studentId, {
-    status: 'confirmed',
-    instructor_id: instructor_id,
-    confirmed_at: eventTime,
-
-// 🔥 CLEAN INVALID FUTURE STATES
-  started_at: null,
-  completed_at: null,
-  cancelled_at: null
-  });
-}
-
-if (studentId) {
-  emitToStudent(studentId, {
-    type: "student_update"
-  });
-}
-
-
-  // 🥇 5️⃣ CREATE LESSON ENTITY (CLEAN)
-
-    const newLessonId = uuidv4(); // ✅ renamed
+    // 5. Create lesson identity
+    const lesson_id = uuidv4();
 
     await client.query(`
       INSERT INTO identity (id, identity_type)
       VALUES ($1, 'lesson')
-    `, [newLessonId]);
+    `, [lesson_id]);
 
-
-
+    // 6. lesson_created event (CRITICAL)
     await client.query(`
       INSERT INTO event (
         id,
@@ -171,51 +309,171 @@ if (studentId) {
       VALUES ($1,$2,'lesson_created',$3,$4)
     `, [
       uuidv4(),
-      newLessonId,
+      lesson_id,
       instructor_id,
       JSON.stringify({
-        lesson_id: newLessonId,
-        lesson_request_id
+        lesson_id,
+        lesson_request_id,
+        instructor_id
       })
     ]);
 
+    // 7. Confirm projection
+    await client.query(`
+      UPDATE lesson_schedule_projection
+      SET status = 'confirmed',
+          updated_at = NOW()
+      WHERE lesson_request_id = $1
+    `, [lesson_request_id]);
 
-   // ✅ STUDENT PROJECTION UPDATE (attach lesson_id)
-console.log("🔥 LESSON_CREATED HOOK HIT:", studentId);
+    // 8. Remove competing offers
+    await client.query(`
+      DELETE FROM instructor_offers_projection
+      WHERE lesson_request_id = $1
+    `, [lesson_request_id]);
 
-if (studentId) {
-  await updateStudentState(client, studentId, {
-    lesson_id: newLessonId
-  });
+    // 9. Student state update
+    const studentId = await findStudentByRequest(
+      client,
+      lesson_request_id
+    );
 
-   //await client.query("COMMIT");
+    if (studentId) {
+      await updateStudentState(client, studentId, {
+        status: "confirmed",
+        instructor_id,
+        lesson_id,
+        confirmed_at: confirmedAt,
+        started_at: null,
+        completed_at: null,
+        cancelled_at: null
+      });
+    }
 
-  // 🔥 CRITICAL — EMIT TO STUDENT
-  emitToStudent(studentId, {
-    type: "student_update"
-  });
-}
+    await client.query("COMMIT");
 
-// ✅ KEEP instructor update
-emitToInstructor(instructor_id, {
-  type: "dashboard_update"
-});
+    // Emit AFTER commit
+    if (studentId) {
+      emitToStudent(studentId, {
+        type: "student_update"
+      });
+    }
 
-
-    console.log("✅ LESSON CONFIRMED:", lesson_request_id);
-
+    emitToInstructor(instructor_id, {
+      type: "dashboard_update"
+    });
 
     res.json({
       status: "offer_accepted",
-      lesson_id: newLessonId // ✅ return correct id
+      lesson_id
     });
 
   } catch (err) {
-   // await client.query("ROLLBACK");
+    await client.query("ROLLBACK");
     console.error("❌ ACCEPT ERROR:", err);
-    res.status(500).json({ error: err.message });
+
+    res.status(500).json({
+      error: err.message
+    });
+
   } finally {
-   // client.release();
+    client.release();
+  }
+});
+
+router.post("/instructor/login", async (req, res) => {
+  try {
+    const { mobile_number, password } = req.body;
+
+    if (!mobile_number || !password) {
+      return res.status(400).json({
+        error: "mobile_and_password_required"
+      });
+    }
+
+    const result = await pool.query(
+      `
+      SELECT
+        id,
+        full_name,
+        mobile_number,
+        password_hash,
+        status,
+        is_verified
+      FROM instructors
+      WHERE mobile_number = $1
+      LIMIT 1
+      `,
+      [mobile_number]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(401).json({
+        error: "invalid_credentials"
+      });
+    }
+
+    const instructor = result.rows[0];
+    if (!instructor.password_hash) {
+  return res.status(401).json({
+    error: "password_not_set"
+  });
+}
+
+const ok = await bcrypt.compare(
+  password,
+  instructor.password_hash
+);
+
+if (!ok) {
+  return res.status(401).json({
+    error: "invalid_credentials"
+  });
+}
+
+    if (
+      instructor.status !== "active" ||
+      !instructor.is_verified
+    ) {
+      return res.status(403).json({
+        error: "account_not_approved"
+      });
+    }
+
+    const token = jwt.sign(
+      {
+        instructor_id: instructor.id,
+        role: "instructor"
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: "7d" }
+    );
+
+    await pool.query(
+      `
+      UPDATE instructors
+      SET last_login_at = NOW()
+      WHERE id = $1
+      `,
+      [instructor.id]
+    );
+
+    res.json({
+      status: "ok",
+      token,
+      instructor: {
+        id: instructor.id,
+        full_name: instructor.full_name,
+        mobile_number: instructor.mobile_number
+      }
+    });
+
+  } catch (err) {
+    console.error("INSTRUCTOR LOGIN ERROR:", err);
+
+    res.status(500).json({
+      error: "login_failed"
+    });
   }
 });
 

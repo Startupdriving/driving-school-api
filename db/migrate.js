@@ -27,8 +27,24 @@ export async function runMigrations() {
     const files = fs.readdirSync(migrationsPath);
 
     const migrationFiles = files
-      .filter(file => file.endsWith(".sql"))
-      .sort((a, b) => {
+      .filter(file => file.endsWith(".sql"));
+
+    const seenVersions = new Map();
+
+     for (const file of migrationFiles) {
+    const version = parseInt(file.split("_")[0]);
+
+      if (seenVersions.has(version)) {
+      throw new Error(
+      `Duplicate migration version ${version}: ` +
+      `${seenVersions.get(version)} and ${file}`
+    );
+  }
+
+  seenVersions.set(version, file);
+}
+
+migrationFiles.sort((a, b) => {
   const vA = parseInt(a.split("_")[0]);
   const vB = parseInt(b.split("_")[0]);
   return vA - vB;
@@ -50,9 +66,13 @@ export async function runMigrations() {
         await client.query(sql);
 
        await client.query(
-      "INSERT INTO schema_version (version) VALUES ($1)",
-      [version]
-      );
+        `
+        INSERT INTO schema_version (version)
+        VALUES ($1)
+        ON CONFLICT (version) DO NOTHING
+        `,
+         [version]
+        );
 
       await client.query("COMMIT");
 

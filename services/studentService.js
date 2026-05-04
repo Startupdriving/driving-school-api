@@ -13,6 +13,13 @@ function isValidUUID(id) {
 
 // CREATE STUDENT
 export async function createStudent(req, res) {
+
+if (!req.body.full_name) {
+    return res.status(400).json({
+      error: "full_name required"
+    });
+  }
+
   const client = await pool.connect();
 
   try {
@@ -33,10 +40,14 @@ export async function createStudent(req, res) {
         generateUUID(),
         studentId,
         JSON.stringify({
-          performed_by: "system",
-          source: "api",
-          action: "student_created"
-        })
+        performed_by: "system",
+        source: "api",
+        action: "student_created",
+
+    // ✅ ADD THESE
+        full_name: req.body.full_name,
+        phone: req.body.phone || null
+       })
       ]
     );
 

@@ -112,3 +112,97 @@ export const getInstructorOffers = async (instructorId) => {
 
   return res.json()
 }
+
+
+export async function acceptOffer(data) {
+  const res = await fetch("http://localhost:5173/write/offer/accept", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(data)
+  });
+
+  if (!res.ok) {
+    throw new Error("accept_offer_failed");
+  }
+
+  return await res.json();
+}
+
+
+// ==============================
+// USERS MANAGEMENT API
+// ==============================
+
+export const getUsersSummary = () =>
+  fetch("http://localhost:5173/admin/users/summary")
+    .then(r => r.json());
+
+export const getAdmins = () =>
+  fetch("http://localhost:5173/admin/admins")
+    .then(r => r.json());
+
+export const getStudents = () =>
+  fetch("http://localhost:5173/admin/students")
+    .then(r => r.json());
+
+export const getInstructors = () =>
+  fetch("http://localhost:5173/admin/instructors")
+    .then(r => r.json());
+
+export async function createInstructor(payload) {
+  const res = await fetch(
+    "http://localhost:5173/admin/instructors/create",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    }
+  );
+
+  return await res.json();
+}
+
+
+export async function updateInstructorStatus(id, status) {
+  const res = await fetch(
+    `http://localhost:5173/admin/instructors/${id}/status`,
+    {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ status })
+    }
+  );
+
+  return await res.json();
+}
+
+
+export const getInstructorDetail = (id) =>
+  fetch(`http://localhost:5173/admin/instructors/${id}`)
+    .then(r => r.json());
+
+export async function updateInstructor(id, payload) {
+  const res = await fetch(
+    `http://localhost:5173/admin/instructors/${id}`,
+    {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    }
+  );
+
+  return await res.json();
+}
+
+
+export const getPendingInstructors = () =>
+  fetch("http://localhost:5173/admin/approvals/instructors")
+    .then(r => r.json());

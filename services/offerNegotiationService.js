@@ -4,6 +4,41 @@ import { emitToStudent, emitToInstructor } from "./wsService.js";
 import { createLesson } from "./lessonEngine.js";
 import { insertEvent } from "./eventStore.js";
 
+
+
+
+function validateSlotRules(startTime, endTime) {
+  const start = new Date(startTime);
+  const end = new Date(endTime);
+  const now = new Date();
+
+  // End after start
+  if (end <= start) {
+    throw new Error("invalid_time_range");
+  }
+
+  // Minimum notice = 1 hour
+  const minStart = new Date(now.getTime() + 60 * 60 * 1000);
+  if (start < minStart) {
+    throw new Error("minimum_notice_required");
+  }
+
+  // Max future = 14 days
+  const maxStart = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
+  if (start > maxStart) {
+    throw new Error("booking_too_far");
+  }
+
+  // Duration minutes
+  const durationMin = (end - start) / (1000 * 60);
+
+  if (![60, 90].includes(durationMin)) {
+    throw new Error("invalid_lesson_duration");
+  }
+}
+
+
+
 export async function counterOffer(req, res) {
   const {
     offer_id,
@@ -31,6 +66,10 @@ export async function counterOffer(req, res) {
     }
 
     const offer = rows[0];
+
+
+   validateSlotRules(proposed_start_time, proposed_end_time);
+
 
     // 🧠 STEP 2 — VALIDATION
 
@@ -115,12 +154,130 @@ export async function acceptOffer(req, res) {
 
     const offer = rows[0];
 
-
-  // 🛑 DOUBLE ACCEPT GUARD
+          // 🛑 DOUBLE ACCEPT GUARD
     if (['accepted', 'rejected'].includes(offer.status)) {
-  throw new Error("offer_already_finalized");
+      throw new Error("offer_already_finalized");
+     }
+
+
+    validateSlotRules(
+   offer.proposed_start_time,
+   offer.proposed_end_time
+   );
+
+// 🛑 STOP stale / already resolved requests
+const reqState = await client.query(`
+  SELECT status
+  FROM lesson_negotiation_projection
+  WHERE lesson_request_id = $1
+  LIMIT 1
+`, [offer.lesson_request_id]);
+
+if (
+  reqState.rows.length &&
+  reqState.rows[0].status !== 'pending'
+) {
+  throw new Error("request_not_pending");
 }
 
+
+    validateSlotRules(
+   offer.proposed_start_time,
+   offer.proposed_end_time
+   );
+
+
+// PostgreSQL dow style:
+// Sunday=0 ... Saturday=6
+/* const startDate = new Date(offer.proposed_start_time);
+const endDate = new Date(offer.proposed_end_time);
+
+const dayOfWeek = startDate.getDay(); // local weekday
+
+const lessonTime = startDate.toLocaleTimeString("en-GB", {
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false
+});
+
+const lessonEndTime = endDate.toLocaleTimeString("en-GB", {
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false
+});
+
+console.log("AVAIL CHECK", {
+  instructor_id: offer.instructor_id,
+  dayOfWeek,
+  lessonTime,
+  lessonEndTime
+});
+
+
+const availability = await client.query(`
+  SELECT 1
+  FROM event
+  WHERE identity_id = $1
+    AND event_type = 'instructor_availability_set'
+    AND (payload->>'day_of_week')::int = $2
+    AND (payload->>'start_time')::time <= $3::time
+    AND (payload->>'end_time')::time >= $4::time
+  ORDER BY created_at DESC
+  LIMIT 1
+`, [
+  offer.instructor_id,
+  dayOfWeek,
+  lessonTime,
+  lessonEndTime
+]);
+
+if (availability.rowCount === 0) {
+  throw new Error("instructor_unavailable");
+}
+
+console.log("AVAIL ROWS:", availability.rows);
+*/
+    // ==================================================
+// HARD CONFLICT PROTECTION
+// ==================================================
+
+// 3️⃣ Instructor conflict
+const instructorConflict = await client.query(`
+  SELECT 1
+  FROM lesson_schedule_projection
+  WHERE instructor_id = $1
+    AND status IN ('confirmed','started')
+    AND tstzrange(start_time, end_time, '[)') &&
+        tstzrange($2::timestamptz, $3::timestamptz, '[)')
+  LIMIT 1
+`, [
+  offer.instructor_id,
+  offer.proposed_start_time,
+  offer.proposed_end_time
+]);
+
+if (instructorConflict.rowCount > 0) {
+  throw new Error("instructor_time_conflict");
+}
+
+// 4️⃣ Student conflict
+const studentConflict = await client.query(`
+  SELECT 1
+  FROM lesson_schedule_projection
+  WHERE student_id = $1
+    AND status IN ('confirmed','started')
+    AND tstzrange(start_time, end_time, '[)') &&
+        tstzrange($2::timestamptz, $3::timestamptz, '[)')
+  LIMIT 1
+`, [
+  offer.student_id,
+  offer.proposed_start_time,
+  offer.proposed_end_time
+]);
+
+if (studentConflict.rowCount > 0) {
+  throw new Error("student_time_conflict");
+}
 
 
 
@@ -150,17 +307,6 @@ try {
     `, [offer_id]);
 
 
-     await client.query(`
-  UPDATE lesson_negotiation_projection
-  SET status = 'accepted',
-      instructor_id = $1,
-      updated_at = NOW()
-  WHERE lesson_request_id = $2
-`, [
-  offer.instructor_id,
-  offer.lesson_request_id
-]);
-
 
     // 🧠 STEP 2 — INSERT EVENT
     await insertEvent(client, {
@@ -173,20 +319,20 @@ try {
     final_start_time: offer.proposed_start_time,
     final_end_time: offer.proposed_end_time,
     final_price: offer.proposed_price
-  }
+ }
 });
 
 
-// ❌ CANCEL ALL OTHER OFFERS
-await client.query(`
+ // ❌ CANCEL ALL OTHER OFFERS
+ await client.query(`
   UPDATE lesson_offer_negotiation_projection
   SET status = 'rejected', updated_at = NOW()
   WHERE lesson_request_id = $1
     AND offer_id != $2
-`, [
+ `, [
   offer.lesson_request_id,
   offer_id
-]);
+ ]);
 
     await client.query("COMMIT");
 

@@ -311,10 +311,60 @@ router.get("/student-dashboard", async (req, res) => {
   try {
 
     const activeLesson = await pool.query(`
-      SELECT *
-      FROM student_active_lesson_projection
-      WHERE student_id = $1
-    `, [student_id]);
+  SELECT
+    l.*,
+    COALESCE(i.full_name, l.instructor_id::text) AS instructor_name
+
+  FROM student_active_lesson_projection l
+
+  LEFT JOIN instructor_profile_projection i
+    ON i.instructor_id = l.instructor_id
+
+  WHERE l.student_id = $1
+`, [student_id]);
+
+
+    const offers = await pool.query(`
+  SELECT
+    o.offer_id,
+    o.lesson_request_id,
+    o.instructor_id,
+    o.student_id,
+
+    -- ✅ FIXED: instructor name
+    i.instructor_name,
+
+    o.status,
+    o.proposed_start_time,
+    o.proposed_end_time,
+    o.proposed_price,
+    o.created_at,
+    o.updated_at
+
+  FROM lesson_offer_negotiation_projection o
+
+  -- ✅ THIS replaces i.full_name
+  LEFT JOIN LATERAL (
+    SELECT payload->>'full_name' AS instructor_name
+    FROM event
+    WHERE event.identity_id = o.instructor_id
+      AND event.event_type = 'instructor_created'
+    ORDER BY created_at ASC
+    LIMIT 1
+  ) i ON true
+
+  WHERE o.student_id = $1
+    AND o.status IN ('sent','countered')
+    AND o.lesson_request_id IN (
+      SELECT lesson_request_id
+      FROM lesson_negotiation_projection
+      WHERE status = 'pending'
+    )
+
+  ORDER BY o.updated_at DESC
+  LIMIT 10
+`, [student_id]);
+
 
     const upcomingLessons = await pool.query(`
       SELECT *
@@ -323,6 +373,54 @@ router.get("/student-dashboard", async (req, res) => {
       ORDER BY start_time
       LIMIT 5
     `, [student_id]);
+
+
+   const incomingRes = await pool.query(`
+  SELECT
+    r.lesson_id,
+    r.requested_by,
+    r.requested_by_id,
+    r.proposed_start_time,
+    r.proposed_end_time,
+    r.reason,
+    r.status,
+    r.created_at
+  FROM lesson_reschedule_projection r
+  JOIN lesson_schedule_projection l
+    ON l.lesson_request_id = r.lesson_id
+  WHERE r.status = 'pending'
+    AND r.requested_by = 'instructor'
+    AND l.student_id = $1
+  ORDER BY r.created_at DESC
+  LIMIT 1
+`, [student_id]);
+
+const outgoingRes = await pool.query(`
+  SELECT
+    r.lesson_id,
+    r.requested_by,
+    r.requested_by_id,
+    r.proposed_start_time,
+    r.proposed_end_time,
+    r.reason,
+    r.status,
+    r.created_at
+  FROM lesson_reschedule_projection r
+  JOIN lesson_schedule_projection l
+    ON l.lesson_request_id = r.lesson_id
+  WHERE r.status = 'pending'
+    AND r.requested_by = 'student'
+    AND l.student_id = $1
+  ORDER BY r.created_at DESC
+  LIMIT 1
+`, [student_id]);
+
+const incomingReschedule =
+  incomingRes.rows[0] || null;
+
+const outgoingReschedule =
+  outgoingRes.rows[0] || null;
+
 
     const instructorZones = await pool.query(`
       SELECT
@@ -334,11 +432,14 @@ JOIN geo_zones z
 ON icz.zone_id = z.id
     `);
 
-    res.json({
-      active_lesson: activeLesson.rows[0] || null,
-      upcoming_lessons: upcomingLessons.rows,
-      instructor_locations: instructorZones.rows
-    });
+     res.json({
+  active_lesson: activeLesson.rows[0] || null,
+  pending_offers: offers.rows,
+  upcoming_lessons: upcomingLessons.rows,
+  instructor_locations: instructorZones.rows,
+  incoming_reschedule: incomingReschedule,
+  outgoing_reschedule: outgoingReschedule
+});
 
   } catch (err) {
 
@@ -459,55 +560,136 @@ router.get("/instructor-dashboard/:id", async (req, res) => {
   const { id } = req.params;
 
   try {
-    const activeLessonRes = await pool.query(`
-      SELECT e.identity_id AS lesson_id,
-             (e.payload->>'lesson_request_id')::uuid AS lesson_request_id
-      FROM event e
-      WHERE e.event_type = 'lesson_created'
-        AND e.instructor_id = $1
-        AND NOT EXISTS (
-          SELECT 1
-          FROM event e2
-          WHERE e2.identity_id = e.identity_id
-            AND e2.event_type IN ('lesson_completed', 'lesson_cancelled')
-        )
-      LIMIT 1
-    `, [id]);
+     const activeLessonRes = await pool.query(`
+SELECT
+  l.lesson_request_id AS lesson_id,
+  l.student_id,
+  COALESCE(s.full_name, l.student_id::text) AS student_name,
+  l.start_time,
+  l.end_time,
+  l.status,
+
+  (
+    SELECT MIN(e.created_at)
+    FROM event e
+    WHERE e.identity_id = l.lesson_request_id
+      AND e.event_type = 'lesson_requested'
+  ) AS requested_at,
+
+  (
+    SELECT MIN(e.created_at)
+    FROM event e
+    WHERE e.identity_id = l.lesson_request_id
+      AND e.event_type = 'lesson_scheduled'
+  ) AS confirmed_at
+
+FROM lesson_schedule_projection l
+
+LEFT JOIN student_profile_projection s
+  ON s.student_id = l.student_id
+
+WHERE l.instructor_id = $1
+  AND l.status IN ('confirmed','started')
+
+ORDER BY
+  CASE WHEN l.status='started' THEN 1 ELSE 2 END,
+  l.created_at DESC
+LIMIT 1
+`, [id]);
 
     const activeLesson = activeLessonRes.rows[0] || null;
 
     const offersRes = await pool.query(`
-      SELECT p.*
-      FROM instructor_offers_projection p
-      WHERE p.instructor_id = $1
-        AND NOT EXISTS (
-          SELECT 1
-          FROM event e
-          WHERE e.identity_id = p.lesson_request_id
-            AND e.event_type IN (
-              'lesson_confirmed',
-              'lesson_request_expired'
-            )
-        )
-      ORDER BY p.created_at DESC
-    `, [id]);
+  SELECT
+    offer_id,
+    lesson_request_id,
+    instructor_id,
+    student_id,
+    status,
+    proposed_start_time,
+    proposed_end_time,
+    proposed_price,
+    created_at,
+    updated_at
+  FROM lesson_offer_negotiation_projection
+  WHERE instructor_id = $1
+    AND status IN ('sent','countered')
+    AND lesson_request_id IN (
+      SELECT lesson_request_id
+      FROM lesson_negotiation_projection
+      WHERE status = 'pending'
+    )
+  ORDER BY updated_at DESC
+  LIMIT 10
+`, [id]);
 
     const offers = offersRes.rows;
 
+
+    const incomingRes = await pool.query(`
+  SELECT
+    r.lesson_id,
+    r.requested_by,
+    r.requested_by_id,
+    r.proposed_start_time,
+    r.proposed_end_time,
+    r.reason,
+    r.status,
+    r.created_at
+  FROM lesson_reschedule_projection r
+  JOIN lesson_schedule_projection l
+    ON l.lesson_request_id = r.lesson_id
+  WHERE r.status = 'pending'
+    AND r.requested_by = 'student'
+    AND l.instructor_id = $1
+  ORDER BY r.created_at DESC
+  LIMIT 1
+`, [id]);
+
+const outgoingRes = await pool.query(`
+  SELECT
+    r.lesson_id,
+    r.requested_by,
+    r.requested_by_id,
+    r.proposed_start_time,
+    r.proposed_end_time,
+    r.reason,
+    r.status,
+    r.created_at
+  FROM lesson_reschedule_projection r
+  JOIN lesson_schedule_projection l
+    ON l.lesson_request_id = r.lesson_id
+  WHERE r.status = 'pending'
+    AND r.requested_by = 'instructor'
+    AND l.instructor_id = $1
+  ORDER BY r.created_at DESC
+  LIMIT 1
+`, [id]);
+
+const incomingReschedule =
+  incomingRes.rows[0] || null;
+
+const outgoingReschedule =
+  outgoingRes.rows[0] || null;
+
     let status = "idle";
 
-    if (activeLesson) {
-      status = "active";
-    } else if (offers.length > 0) {
-      status = "has_offer";
-    }
+   if (activeLesson) {
+     status = "active";
+   } else if (offers.length > 0) {
+   status = "has_offer";
+   } else {
+   status = "idle";
+   }
 
     res.json({
-      instructor_id: id,
-      status,
-      active_lesson: activeLesson,
-      offers
-    });
+  instructor_id: id,
+  status,
+  active_lesson: activeLesson,
+  offers,
+  incoming_reschedule: incomingReschedule,
+  outgoing_reschedule: outgoingReschedule
+});
   } catch (err) {
     console.error("DASHBOARD ERROR:", err);
     res.status(500).json({ error: "dashboard_failed" });

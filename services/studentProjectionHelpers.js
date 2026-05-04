@@ -28,13 +28,9 @@ async function findStudentByLesson(connection, lessonId) {
   const conn = getConnection(connection);
 
   const res = await conn.query(`
-    SELECT e1.payload->>'student_id' AS student_id
-    FROM event e1
-    JOIN event e2
-      ON e1.identity_id = (e2.payload->>'lesson_request_id')::uuid
-    WHERE e2.identity_id = $1
-    AND e1.event_type = 'lesson_requested'
-    AND e2.event_type = 'lesson_created'
+    SELECT student_id
+    FROM lesson_schedule_projection
+    WHERE lesson_request_id = $1
     LIMIT 1
   `, [lessonId]);
 

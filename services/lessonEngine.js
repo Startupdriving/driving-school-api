@@ -43,7 +43,7 @@ const endIso = new Date(end_time).toISOString();
 await insertEvent(client, {
   id: lessonId,
   identity_id: lessonId,
-  event_type: "lesson_scheduled",
+  event_type: "lesson_created",
   payload: {
     student_id,
     instructor_id,

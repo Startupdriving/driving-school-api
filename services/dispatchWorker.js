@@ -240,19 +240,25 @@ if (acceptedCheck.rows.length > 0) {
   });
 
 
-// 🛑 STOP if already confirmed
-const confirmed = await client.query(`
+// 🛑 STOP if already accepted / confirmed / live offers exist
+
+const stopCheck = await client.query(`
   SELECT 1
-  FROM event
-  WHERE identity_id = $1
-  AND event_type = 'lesson_confirmed'
+  FROM lesson_offer_negotiation_projection
+  WHERE lesson_request_id = $1
+    AND status IN ('sent','countered','accepted')
   LIMIT 1
 `, [requestId]);
 
-if (confirmed.rows.length > 0) {
-  console.log("🛑 STOP DISPATCH — already confirmed:", requestId);
+if (stopCheck.rowCount > 0) {
+  console.log("🛑 STOP DISPATCH — live negotiation exists:", requestId);
   return;
 }
+
+
+// Time Variables
+
+const requestDate = new Date(requested_start_time);
 
   // 🔥 STEP 5 — Candidate selection
 /*
@@ -324,12 +330,73 @@ LIMIT $2
 
 */
 
-// 🧪 TEMP BYPASS — IGNORE FILTERS
-const { rows: candidates } = await client.query(`
-  SELECT instructor_id
-  FROM current_instructor_runtime_state
-  WHERE runtime_state = 'instructor_online'
-`);
+let { rows: candidates } = await client.query(`
+  SELECT
+    r.instructor_id
+  FROM current_instructor_runtime_state r
+
+  INNER JOIN instructors acc
+    ON acc.id = r.instructor_id
+
+  LEFT JOIN identity i
+    ON i.id = r.instructor_id
+
+  LEFT JOIN instructor_offer_stats s
+    ON s.instructor_id = r.instructor_id
+
+  WHERE r.runtime_state = 'instructor_online'
+    AND acc.status = 'active'
+    AND acc.is_verified = true
+    AND r.instructor_id <> ALL($1::uuid[])
+
+  ORDER BY
+    CASE
+      WHEN i.home_zone_id = $2 THEN 0
+      ELSE 1
+    END ASC,
+
+    COALESCE(s.offers_last_24h, 0) ASC,
+
+    COALESCE(s.last_offer_at, '1970-01-01') ASC,
+
+    r.instructor_id ASC
+
+  LIMIT $3
+`, [
+  offeredIds.length
+    ? offeredIds
+    : ['00000000-0000-0000-0000-000000000000'],
+  zoneId,
+  dynamicWaveSize
+]);
+
+
+
+console.log("RANKED CANDIDATES:", candidates);
+
+
+if (candidates.length === 0) {
+  console.log("⚠️ No available instructors → fallback");
+
+  const fallback = await client.query(`
+   SELECT r.instructor_id
+   FROM current_instructor_runtime_state r
+   INNER JOIN instructors acc
+    ON acc.id = r.instructor_id
+  WHERE r.runtime_state = 'instructor_online'
+    AND acc.status = 'active'
+    AND acc.is_verified = true
+    AND r.instructor_id <> ALL($1::uuid[])
+  LIMIT $2
+`, [
+  offeredIds.length
+    ? offeredIds
+    : ['00000000-0000-0000-0000-000000000000'],
+  dynamicWaveSize
+]);
+
+  candidates = fallback.rows;
+}
 
 console.log("🧪 BYPASS CANDIDATES:", candidates);
 
@@ -437,7 +504,7 @@ if (existingOffer.rowCount === 0) {
 
   console.log("📦 CREATE OFFER NEGOTIATION:", offerId);
 }
-
+console.log("INSERT FROM dispatchWorker");
   const result = await client.query(`
   INSERT INTO lesson_offer_negotiation_projection (
     offer_id,
@@ -455,7 +522,8 @@ if (existingOffer.rowCount === 0) {
   )
   VALUES ($1,$2,$3,$4,'sent','student',$5,$6,$5,$6,NOW(),NOW())
   ON CONFLICT (lesson_request_id, instructor_id)
-  DO NOTHING
+  DO UPDATE SET
+  updated_at = NOW()
 `, [
   offerId,
   requestId,

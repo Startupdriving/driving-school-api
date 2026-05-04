@@ -25,6 +25,14 @@ function isValidUUID(id) {
 
 // CREATE INSTRUCTOR
 export async function createInstructor(req, res) {
+
+
+if (!req.body.full_name) {
+  return res.status(400).json({
+    error: "full_name required"
+  });
+}
+
   const client = await pool.connect();
 
   try {
@@ -45,10 +53,13 @@ export async function createInstructor(req, res) {
         generateUUID(),
         instructorId,
         JSON.stringify({
-          performed_by: "system",
-          source: "api",
-          action: "instructor_created"
-        })
+        performed_by: "system",
+        source: "api",
+        action: "instructor_created",
+
+        full_name: req.body.full_name,
+        phone: req.body.phone || null
+       })
       ]
     );
 
@@ -225,8 +236,14 @@ export async function goOnline(req, res) {
       }
 
       const exists = await client.query(
-        `SELECT 1 FROM identity WHERE id = $1 AND identity_type = 'instructor'`,
-        [instructor_id]
+       `
+       SELECT 1
+       FROM instructors
+       WHERE id = $1
+       AND status = 'active'
+       AND is_verified = true
+       `,
+       [instructor_id]
       );
 
       if (exists.rowCount === 0) {

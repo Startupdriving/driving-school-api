@@ -50,13 +50,19 @@ export async function requestLesson(req, res) {
 
       // Validate active student
       const studentCheck = await client.query(
-        `SELECT 1 FROM current_active_students WHERE id = $1`,
+        `
+        SELECT 1
+        FROM students
+        WHERE id = $1
+        AND status = 'active'
+        AND is_verified = true
+        `,
         [student_id]
-      );
+        );
 
       if (studentCheck.rowCount === 0) {
-        throw new Error("Student not active");
-      }
+       throw new Error("Student not active");
+       }
 
       const requestId = generateUUID();
 
