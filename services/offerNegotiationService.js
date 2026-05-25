@@ -86,6 +86,7 @@ export async function counterOffer(req, res) {
     }
 
     // 🧠 STEP 3 — INSERT EVENT
+const counteredEvent =
 await insertEvent(client, {
   id: uuidv4(),
   identity_id: offer_id,
@@ -110,14 +111,15 @@ await insertEvent(client, {
         last_response_by = $4,
         status = 'countered',
         response_count = response_count + 1,
-        updated_at = NOW()
+        updated_at = $6
       WHERE offer_id = $5
     `, [
       proposed_start_time,
       proposed_end_time,
       proposed_price,
       actor,
-      offer_id
+      offer_id,
+      counteredEvent.created_at
     ]);
 
     await client.query("COMMIT");
@@ -280,16 +282,65 @@ if (studentConflict.rowCount > 0) {
 }
 
 
+const parentEventRes =
+  await client.query(`
+    SELECT
+      id,
+      correlation_id
+    FROM event
+    WHERE identity_id = $1::uuid
+      AND event_type = 'lesson_offer_sent'
+    ORDER BY sequence_number ASC
+    LIMIT 1
+`, [offer_id]);
+
+const parentEvent =
+  parentEventRes.rows[0];
+
+
+const acceptedEventId =
+  uuidv4();
+
+    // 🧠 STEP 2 — INSERT EVENT
+  const acceptedEvent =
+    await insertEvent(client, {
+  id: acceptedEventId,
+  identity_id: offer_id,
+  event_type: "lesson_offer_accepted",
+    correlation_id:
+    parentEvent.correlation_id,
+
+  causation_id:
+    parentEvent.id,
+
+
+  payload: {
+    offer_id,
+    lesson_request_id: offer.lesson_request_id,
+    final_start_time: offer.proposed_start_time,
+    final_end_time: offer.proposed_end_time,
+    final_price: offer.proposed_price
+ }
+});
+
 
 let lessonId;
 
 try {
  lessonId = await createLesson(client, {
+  lesson_request_id: offer.lesson_request_id,
   student_id: offer.student_id,
   instructor_id: offer.instructor_id,
   start_time: offer.proposed_start_time,
   end_time: offer.proposed_end_time,
-  price: offer.proposed_price
+  price: offer.proposed_price,
+
+  parent_event_id:
+  acceptedEventId,
+
+  correlation_id:
+  parentEvent.correlation_id,
+
 });} catch (err) {
   console.error("LESSON ENGINE FAILED:", err);
   throw err;
@@ -302,36 +353,22 @@ try {
       UPDATE lesson_offer_negotiation_projection
       SET
         status = 'accepted',
-        updated_at = NOW()
+        updated_at = $2
       WHERE offer_id = $1
-    `, [offer_id]);
-
-
-
-    // 🧠 STEP 2 — INSERT EVENT
-    await insertEvent(client, {
-  id: uuidv4(),
-  identity_id: offer_id,
-  event_type: "lesson_offer_accepted",
-  payload: {
-    offer_id,
-    lesson_request_id: offer.lesson_request_id,
-    final_start_time: offer.proposed_start_time,
-    final_end_time: offer.proposed_end_time,
-    final_price: offer.proposed_price
- }
-});
+    `, [offer_id,
+        acceptedEvent.created_at]);
 
 
  // ❌ CANCEL ALL OTHER OFFERS
  await client.query(`
   UPDATE lesson_offer_negotiation_projection
-  SET status = 'rejected', updated_at = NOW()
+  SET status = 'rejected', updated_at = $3
   WHERE lesson_request_id = $1
     AND offer_id != $2
  `, [
   offer.lesson_request_id,
-  offer_id
+  offer_id,
+  acceptedEvent.created_at
  ]);
 
     await client.query("COMMIT");
@@ -388,32 +425,37 @@ export async function rejectOffer(req, res) {
     }
 
     // 🧠 EVENT
-    await client.query(`
-      INSERT INTO event (
-        id,
-        identity_id,
-        event_type,
-        payload
-      )
-      VALUES ($1, $2, 'lesson_offer_rejected', $3)
-    `, [
-      uuidv4(),
-      offer_id,
-      JSON.stringify({
-        offer_id,
-        lesson_request_id: offer.lesson_request_id,
-        rejected_by: actor
-      })
-    ]);
+const rejectedEvent =
+    await insertEvent(client, {
 
+  id: uuidv4(),
+
+  identity_id:
+    offer_id,
+
+  event_type:
+    "lesson_offer_rejected",
+
+  payload: {
+    offer_id,
+
+    lesson_request_id:
+      offer.lesson_request_id,
+
+    rejected_by:
+      actor
+  }
+
+});
     // 🧠 PROJECTION
     await client.query(`
       UPDATE lesson_offer_negotiation_projection
       SET
         status = 'rejected',
-        updated_at = NOW()
+        updated_at = $2
       WHERE offer_id = $1
-    `, [offer_id]);
+    `, [offer_id,
+        rejectedEvent.created_at]);
 
     await client.query("COMMIT");
 

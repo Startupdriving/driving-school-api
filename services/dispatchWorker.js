@@ -357,9 +357,7 @@ let { rows: candidates } = await client.query(`
 
     COALESCE(s.offers_last_24h, 0) ASC,
 
-    COALESCE(s.last_offer_at, '1970-01-01') ASC,
-
-    r.instructor_id ASC
+    COALESCE(s.last_offer_at, '1970-01-01') ASC
 
   LIMIT $3
 `, [
@@ -433,11 +431,35 @@ await insertEvent(client, {
   const expiresAt = new Date(Date.now() + WAVE_TIMEOUT_SECONDS * 1000);
  console.log("🔥 INSERT 312 HIT");
  
+
+const rootEventRes =
+  await client.query(`
+    SELECT
+      id,
+      correlation_id
+    FROM event
+    WHERE identity_id = $1::uuid
+      AND event_type = 'lesson_requested'
+    ORDER BY sequence_number ASC
+    LIMIT 1
+`, [requestId]);
+
+const rootEvent =
+  rootEventRes.rows[0];
+
+
 await insertEvent(client, {
   id: uuidv4(),
   identity_id: requestId,
   event_type: "lesson_request_dispatch_started",
-  payload: {
+
+   correlation_id:
+    rootEvent.correlation_id,
+
+  causation_id:
+    rootEvent.id,
+
+   payload: {
     wave,
     expires_at: expiresAt,
     wave_size: dynamicWaveSize
@@ -461,11 +483,18 @@ await insertEvent(client, {
 
     try {
     console.log("🔥 INSERT 339 HIT");
-
+const offerSentEvent =
       await insertEvent(client, {
   id: uuidv4(),
   identity_id: offerId,
   event_type: "lesson_offer_sent",
+
+  correlation_id:
+  rootEvent.correlation_id,
+
+  causation_id:
+   rootEvent.id,
+
   payload: {
     offer_id: offerId,
     lesson_request_id: requestId,
@@ -483,11 +512,12 @@ await client.query(`
     status,
     created_at
   )
-  VALUES ($1, $2, 'pending', NOW())
+  VALUES ($1, $2, 'pending', $3)
   ON CONFLICT DO NOTHING
 `, [
   instructorId,
-  requestId
+  requestId,
+  offerSentEvent.created_at
 ]);
 
 
@@ -520,17 +550,18 @@ console.log("INSERT FROM dispatchWorker");
     created_at,
     updated_at
   )
-  VALUES ($1,$2,$3,$4,'sent','student',$5,$6,$5,$6,NOW(),NOW())
+  VALUES ($1,$2,$3,$4,'sent','student',$5,$6,$5,$6,$7,$7)
   ON CONFLICT (lesson_request_id, instructor_id)
   DO UPDATE SET
-  updated_at = NOW()
+  updated_at = $7
 `, [
   offerId,
   requestId,
   instructorId,
   studentId,
   requested_start_time,
-  requested_end_time
+  requested_end_time,
+  offerSentEvent.created_at
 ]);
 
 if (result.rowCount === 0) {

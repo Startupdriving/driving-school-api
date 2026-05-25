@@ -9,7 +9,7 @@ import { validate as isUUID } from "uuid";
 import { findStudentByRequest, findStudentByLesson } from '../services/studentProjectionHelpers.js';
 import { upsertStudentState } from '../services/studentProjectionWriter.js';
 import { getInstructorSchedule } from "../services/instructorScheduleService.js";
-
+import { validate as uuidValidate } from "uuid";
 
 const router = express.Router();
 
@@ -25,21 +25,76 @@ router.get("/student/active-lesson", async (req, res) => {
   }
 
   try {
+
     const result = await db.query(`
+
       SELECT
-        student_id,
-        lesson_request_id,
-        lesson_id,
-        status,
-        instructor_id,
-        requested_at,
-        confirmed_at,
-        started_at,
-        completed_at,
-        cancelled_at
-      FROM student_active_lesson_projection
-      WHERE student_id = $1
+        l.student_id,
+
+        l.lesson_request_id,
+
+        l.lesson_request_id AS lesson_id,
+
+        l.status,
+
+        l.instructor_id,
+
+        l.start_time,
+        l.end_time,
+
+        -- requested_at
+        (
+          SELECT MIN(e.created_at)
+          FROM event e
+          WHERE e.identity_id = l.lesson_request_id
+          AND e.event_type = 'lesson_requested'
+        ) AS requested_at,
+
+        -- confirmed_at
+        (
+          SELECT MIN(e.created_at)
+          FROM event e
+          WHERE e.identity_id = l.lesson_request_id
+          AND e.event_type = 'lesson_confirmed'
+        ) AS confirmed_at,
+
+        -- started_at
+        (
+          SELECT MIN(e.created_at)
+          FROM event e
+          WHERE e.identity_id = l.lesson_request_id
+          AND e.event_type = 'lesson_started'
+        ) AS started_at,
+
+        -- completed_at
+        (
+          SELECT MIN(e.created_at)
+          FROM event e
+          WHERE e.identity_id = l.lesson_request_id
+          AND e.event_type = 'lesson_completed'
+        ) AS completed_at,
+
+        -- cancelled_at
+        (
+          SELECT MIN(e.created_at)
+          FROM event e
+          WHERE e.identity_id = l.lesson_request_id
+          AND e.event_type = 'lesson_cancelled'
+        ) AS cancelled_at
+
+      FROM lesson_schedule_projection l
+
+      WHERE l.student_id = $1
+
+      AND l.status IN (
+        'confirmed',
+        'started'
+      )
+
+      ORDER BY l.updated_at DESC
+
       LIMIT 1
+
     `, [student_id]);
 
     if (result.rows.length === 0) {
@@ -49,8 +104,12 @@ router.get("/student/active-lesson", async (req, res) => {
     res.json(result.rows[0]);
 
   } catch (err) {
+
     console.error("READ ERROR:", err);
-    res.status(500).json({ error: "failed_to_fetch_active_lesson" });
+
+    res.status(500).json({
+      error: "failed_to_fetch_active_lesson"
+    });
   }
 });
 
@@ -313,14 +372,13 @@ router.get("/student-dashboard", async (req, res) => {
     const activeLesson = await pool.query(`
   SELECT
     l.*,
-    COALESCE(i.full_name, l.instructor_id::text) AS instructor_name
-
+    COALESCE(i.full_name, l.instructor_id::text)
+      AS instructor_name
   FROM student_active_lesson_projection l
-
   LEFT JOIN instructor_profile_projection i
     ON i.instructor_id = l.instructor_id
-
   WHERE l.student_id = $1
+  LIMIT 1
 `, [student_id]);
 
 
@@ -377,42 +435,52 @@ router.get("/student-dashboard", async (req, res) => {
 
    const incomingRes = await pool.query(`
   SELECT
-    r.lesson_id,
-    r.requested_by,
-    r.requested_by_id,
-    r.proposed_start_time,
-    r.proposed_end_time,
-    r.reason,
-    r.status,
-    r.created_at
-  FROM lesson_reschedule_projection r
-  JOIN lesson_schedule_projection l
-    ON l.lesson_request_id = r.lesson_id
-  WHERE r.status = 'pending'
-    AND r.requested_by = 'instructor'
-    AND l.student_id = $1
-  ORDER BY r.created_at DESC
-  LIMIT 1
+  r.lesson_id,
+  r.requested_by,
+  r.requested_by_id,
+  r.proposed_start_time,
+  r.proposed_end_time,
+  r.reason,
+  r.status,
+  r.created_at
+FROM lesson_reschedule_projection r
+WHERE r.status = 'pending'
+  AND r.requested_by = 'instructor'
+
+  AND EXISTS (
+    SELECT 1
+    FROM lesson_schedule_projection l
+    WHERE l.lesson_id = r.lesson_id
+      AND l.student_id = $1
+  )
+
+ORDER BY r.created_at DESC
+LIMIT 1
 `, [student_id]);
 
 const outgoingRes = await pool.query(`
   SELECT
-    r.lesson_id,
-    r.requested_by,
-    r.requested_by_id,
-    r.proposed_start_time,
-    r.proposed_end_time,
-    r.reason,
-    r.status,
-    r.created_at
-  FROM lesson_reschedule_projection r
-  JOIN lesson_schedule_projection l
-    ON l.lesson_request_id = r.lesson_id
-  WHERE r.status = 'pending'
-    AND r.requested_by = 'student'
-    AND l.student_id = $1
-  ORDER BY r.created_at DESC
-  LIMIT 1
+  r.lesson_id,
+  r.requested_by,
+  r.requested_by_id,
+  r.proposed_start_time,
+  r.proposed_end_time,
+  r.reason,
+  r.status,
+  r.created_at
+FROM lesson_reschedule_projection r
+WHERE r.status = 'pending'
+  AND r.requested_by = 'student'
+
+  AND EXISTS (
+    SELECT 1
+    FROM lesson_schedule_projection l
+    WHERE l.lesson_id = r.lesson_id
+      AND l.student_id = $1
+  )
+
+ORDER BY r.created_at DESC
+LIMIT 1
 `, [student_id]);
 
 const incomingReschedule =
@@ -431,6 +499,18 @@ FROM instructor_current_zone icz
 JOIN geo_zones z
 ON icz.zone_id = z.id
     `);
+
+
+console.log(
+  "INCOMING RES:",
+  incomingRes.rows
+);
+
+console.log(
+  "OUTGOING RES:",
+  outgoingRes.rows
+);
+
 
      res.json({
   active_lesson: activeLesson.rows[0] || null,
@@ -562,13 +642,22 @@ router.get("/instructor-dashboard/:id", async (req, res) => {
   try {
      const activeLessonRes = await pool.query(`
 SELECT
-  l.lesson_request_id AS lesson_id,
+  l.lesson_id,
+
+  l.lesson_request_id,
+
   l.student_id,
-  COALESCE(s.full_name, l.student_id::text) AS student_name,
+
+  COALESCE(
+    s.full_name,
+    l.student_id::text
+  ) AS student_name,
+
   l.start_time,
   l.end_time,
   l.status,
 
+  -- requested_at
   (
     SELECT MIN(e.created_at)
     FROM event e
@@ -576,12 +665,45 @@ SELECT
       AND e.event_type = 'lesson_requested'
   ) AS requested_at,
 
+  -- confirmed_at
   (
     SELECT MIN(e.created_at)
     FROM event e
-    WHERE e.identity_id = l.lesson_request_id
-      AND e.event_type = 'lesson_scheduled'
-  ) AS confirmed_at
+    WHERE e.identity_id =
+      COALESCE(l.lesson_id, l.lesson_request_id)
+      AND e.event_type IN (
+        'lesson_confirmed',
+        'lesson_created',
+        'lesson_scheduled'
+      )
+  ) AS confirmed_at,
+
+  -- started_at
+  (
+    SELECT MIN(e.created_at)
+    FROM event e
+    WHERE e.identity_id =
+      COALESCE(l.lesson_id, l.lesson_request_id)
+      AND e.event_type = 'lesson_started'
+  ) AS started_at,
+
+  -- completed_at
+  (
+    SELECT MIN(e.created_at)
+    FROM event e
+    WHERE e.identity_id =
+      COALESCE(l.lesson_id, l.lesson_request_id)
+      AND e.event_type = 'lesson_completed'
+  ) AS completed_at,
+
+  -- cancelled_at
+  (
+    SELECT MIN(e.created_at)
+    FROM event e
+    WHERE e.identity_id =
+      COALESCE(l.lesson_id, l.lesson_request_id)
+      AND e.event_type = 'lesson_cancelled'
+  ) AS cancelled_at
 
 FROM lesson_schedule_projection l
 
@@ -638,7 +760,7 @@ LIMIT 1
     r.created_at
   FROM lesson_reschedule_projection r
   JOIN lesson_schedule_projection l
-    ON l.lesson_request_id = r.lesson_id
+    ON l.lesson_id = r.lesson_id
   WHERE r.status = 'pending'
     AND r.requested_by = 'student'
     AND l.instructor_id = $1
@@ -658,7 +780,7 @@ const outgoingRes = await pool.query(`
     r.created_at
   FROM lesson_reschedule_projection r
   JOIN lesson_schedule_projection l
-    ON l.lesson_request_id = r.lesson_id
+    ON l.lesson_id = r.lesson_id
   WHERE r.status = 'pending'
     AND r.requested_by = 'instructor'
     AND l.instructor_id = $1
@@ -697,29 +819,7 @@ const outgoingReschedule =
 });
 
 
-router.post("/admin/rebuild-projections", async (req, res) => {
 
-  try {
-
-    console.log("PROJECTION REBUILD STARTED")
-
-    await rebuildProjections()
-
-    res.json({
-      status: "rebuild_started"
-    })
-
-  } catch (err) {
-
-    console.error("projection rebuild error:", err)
-
-    res.status(500).json({
-      error: "projection_rebuild_failed"
-    })
-
-  }
-
-})
 
 router.get("/event-stream", async (req, res) => {
   try {
@@ -727,7 +827,10 @@ router.get("/event-stream", async (req, res) => {
 
     let result;
 
-    if (id) {
+   if (
+  id &&
+  isUUID(id)
+) {
       // ✅ SINGLE LESSON MODE (Inspector)
       result = await pool.query(`
         SELECT
@@ -737,7 +840,7 @@ router.get("/event-stream", async (req, res) => {
           identity_id
         FROM event
         WHERE identity_id = $1
-        ORDER BY created_at ASC
+        ORDER BY sequence_number ASC
       `, [id]);
     } else {
       // ✅ GLOBAL STREAM MODE (Dashboard)
@@ -748,7 +851,7 @@ router.get("/event-stream", async (req, res) => {
           created_at,
           identity_id
         FROM event
-        ORDER BY created_at DESC
+        ORDER BY sequence_number DESC
         LIMIT 100
       `);
     }
@@ -1113,9 +1216,29 @@ router.get("/instructor-active-lesson/:id", async (req, res) => {
   const { id } = req.params;
 
   const result = await pool.query(`
-    SELECT *
-    FROM active_lessons_projection
+    SELECT
+      lesson_request_id AS lesson_id,
+      lesson_request_id,
+      instructor_id,
+      student_id,
+      start_time,
+      end_time,
+      status,
+      created_at,
+      updated_at
+
+    FROM lesson_schedule_projection
+
     WHERE instructor_id = $1
+      AND status IN ('confirmed', 'started')
+
+    ORDER BY
+      CASE
+        WHEN status = 'started' THEN 1
+        ELSE 2
+      END,
+      created_at DESC
+
     LIMIT 1
   `, [id]);
 

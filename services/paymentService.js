@@ -1,5 +1,7 @@
 import { v4 as uuidv4 } from "uuid";
 import { withIdempotency } from "./idempotencyService.js";
+import { insertEvent }
+from "./eventStore.js";
 
 export async function confirmPayment(req, res) {
   try {
@@ -61,38 +63,49 @@ export async function confirmPayment(req, res) {
       const amount = parseFloat(paymentInfo.rows[0].amount);
 
       // 1️⃣ Insert payment_confirmed
-      await client.query(
-        `
-        INSERT INTO event (id, identity_id, event_type, payload)
-        VALUES ($1, $2, 'payment_confirmed', $3)
-        `,
-        [
-          uuidv4(),
-          payment_id,
-          JSON.stringify({
-            confirmed_at: new Date()
-          })
-        ]
-      );
+      await insertEvent(client, {
+
+  id: uuidv4(),
+
+  identity_id:
+    payment_id,
+
+  event_type:
+    "payment_confirmed",
+
+  payload: {
+
+    confirmed_at:
+      new Date()
+
+  }
+
+});
 
       // 2️⃣ Calculate commission (20%)
       const commission = amount * 0.2;
       const instructorShare = amount - commission;
 
-      await client.query(
-        `
-        INSERT INTO event (id, identity_id, event_type, payload)
-        VALUES ($1, $2, 'commission_calculated', $3)
-        `,
-        [
-          uuidv4(),
-          payment_id,
-          JSON.stringify({
-            commission,
-            instructor_share: instructorShare
-          })
-        ]
-      );
+      await insertEvent(client, {
+
+  id: uuidv4(),
+
+  identity_id:
+    payment_id,
+
+  event_type:
+    "commission_calculated",
+
+  payload: {
+
+    commission,
+
+    instructor_share:
+      instructorShare
+
+  }
+
+});
 
       return {
         message: "Payment confirmed",
@@ -166,19 +179,24 @@ export async function completePayout(req, res) {
         throw new Error("Payout already completed");
       }
 
-      await client.query(
-        `
-        INSERT INTO event (id, identity_id, event_type, payload)
-        VALUES ($1, $2, 'payout_completed', $3)
-        `,
-        [
-          uuidv4(),
-          payment_id,
-          JSON.stringify({
-            paid_at: new Date()
-          })
-        ]
-      );
+      await insertEvent(client, {
+
+  id: uuidv4(),
+
+  identity_id:
+    payment_id,
+
+  event_type:
+    "payout_completed",
+
+  payload: {
+
+    paid_at:
+      new Date()
+
+  }
+
+});
 
       return { message: "Payout completed" };
     });

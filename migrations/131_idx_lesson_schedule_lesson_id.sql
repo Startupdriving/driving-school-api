@@ -1,0 +1,2 @@
+CREATE INDEX idx_lesson_schedule_lesson_id
+ON lesson_schedule_projection(lesson_id);

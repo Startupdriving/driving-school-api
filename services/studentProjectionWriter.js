@@ -1,4 +1,8 @@
-async function upsertStudentState(connection, data) {
+async function upsertStudentState(
+  connection,
+  data,
+  eventTime
+) {
   await connection.query(`
     INSERT INTO student_active_lesson_projection (
       student_id,
@@ -13,7 +17,7 @@ async function upsertStudentState(connection, data) {
       cancelled_at,
       updated_at
     )
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW())
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
     ON CONFLICT (student_id)
     DO UPDATE SET
       lesson_request_id = EXCLUDED.lesson_request_id,
@@ -25,7 +29,7 @@ async function upsertStudentState(connection, data) {
       started_at = EXCLUDED.started_at,
       completed_at = EXCLUDED.completed_at,
       cancelled_at = EXCLUDED.cancelled_at,
-      updated_at = NOW()
+      updated_at = $11
   `, [
     data.student_id,
     data.lesson_request_id,
@@ -36,12 +40,13 @@ async function upsertStudentState(connection, data) {
     data.confirmed_at,
     data.started_at,
     data.completed_at,
-    data.cancelled_at
+    data.cancelled_at,
+    eventTime
   ]);
 }
 
 
-async function updateStudentState(connection, studentId, fields) {
+async function updateStudentState(connection, studentId, fields, eventTime) {
 
   // 🟢 STEP A — GET CURRENT STATUS
   const { rows } = await connection.query(`
@@ -74,9 +79,9 @@ async function updateStudentState(connection, studentId, fields) {
 
   await connection.query(`
     UPDATE student_active_lesson_projection
-    SET ${setClause}, updated_at = NOW()
+    SET ${setClause}, updated_at = $${keys.length + 2}
     WHERE student_id = $1
-  `, [studentId, ...values]);
+  `, [studentId, ...values, eventTime]);
 }
 
 

@@ -25,6 +25,8 @@ import InstructorOnboarding from "./pages/InstructorOnboarding";
 import InstructorDetail from "./pages/InstructorDetail";
 import Approvals from "./pages/Approvals";
 import InstructorLogin from "./pages/InstructorLogin";
+import Governance from "./pages/Governance";
+
 
 export default function App() {
   return (
@@ -38,7 +40,7 @@ export default function App() {
         <Route path="/student" element={ <RequireStudent> <StudentApp /> </RequireStudent>} />
         <Route path="/instructor" element={ <RequireInstructor>  <InstructorApp />  </RequireInstructor> } />
         <Route path="/instructor-login" element={<InstructorLogin />} />
-
+        <Route path="/governance" element={<Governance />}/>
         {/* PROTECTED ADMIN ROUTES */}
         <Route
           element={

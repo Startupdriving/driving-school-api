@@ -1,15 +1,32 @@
 import { withIdempotency } from "./idempotencyService.js";
 import pool from "../db.js";
 import crypto from "crypto";
+import { handleEvent } from "./eventHandler.js";
+import { insertEvent }
+from "./eventStore.js";
 
-async function insertInstructorStateEvent(client, instructorId, eventType) {
-  await client.query(
-    `
-    INSERT INTO event (id, identity_id, event_type, payload)
-    VALUES ($1, $2, $3, '{}'::jsonb)
-    `,
-    [crypto.randomUUID(), instructorId, eventType]
-  );
+
+async function insertInstructorStateEvent(
+  client,
+  instructorId,
+  eventType
+) {
+
+  await insertEvent(client, {
+
+    id:
+      crypto.randomUUID(),
+
+    identity_id:
+      instructorId,
+
+    event_type:
+      eventType,
+
+    payload: {}
+
+  });
+
 }
 
 
@@ -40,28 +57,51 @@ if (!req.body.full_name) {
 
     const instructorId = generateUUID();
 
+
+     await client.query(`
+      INSERT INTO identity (id, identity_type)
+      VALUES ($1, 'instructor')
+      ON CONFLICT DO NOTHING
+    `, [instructorId]);
+
+
     await client.query(
       `INSERT INTO identity (id, identity_type)
        VALUES ($1, 'instructor')`,
       [instructorId]
     );
 
-    await client.query(
-      `INSERT INTO event (id, identity_id, event_type, payload)
-       VALUES ($1, $2, 'instructor_created', $3::jsonb)`,
-      [
-        generateUUID(),
-        instructorId,
-        JSON.stringify({
-        performed_by: "system",
-        source: "api",
-        action: "instructor_created",
+    await insertEvent(client, {
 
-        full_name: req.body.full_name,
-        phone: req.body.phone || null
-       })
-      ]
-    );
+  id:
+    generateUUID(),
+
+  identity_id:
+    instructorId,
+
+  event_type:
+    "instructor_created",
+
+  payload: {
+
+    performed_by:
+      "system",
+
+    source:
+      "api",
+
+    action:
+      "instructor_created",
+
+    full_name:
+      req.body.full_name,
+
+    phone:
+      req.body.phone || null
+
+  }
+
+});
 
     await client.query("COMMIT");
 
@@ -105,19 +145,31 @@ export async function activateInstructor(req, res) {
       return res.status(400).json({ error: "Instructor already active" });
     }
 
-    await client.query(
-      `INSERT INTO event (id, identity_id, event_type, payload)
-       VALUES ($1, $2, 'instructor_activated', $3::jsonb)`,
-      [
-        generateUUID(),
-        instructor_id,
-        JSON.stringify({
-          performed_by: "system",
-          source: "api",
-          action: "instructor_activated"
-        })
-      ]
-    );
+    await insertEvent(client, {
+
+  id:
+    generateUUID(),
+
+  identity_id:
+    instructor_id,
+
+  event_type:
+    "instructor_activated",
+
+  payload: {
+
+    performed_by:
+      "system",
+
+    source:
+      "api",
+
+    action:
+      "instructor_activated"
+
+  }
+
+});
 
     await client.query("COMMIT");
 
@@ -154,21 +206,28 @@ export async function setInstructorAvailability(req, res) {
       throw new Error("Instructor not found");
     }
 
-    await client.query(
-      `
-      INSERT INTO event (id, identity_id, event_type, payload)
-      VALUES ($1, $2, 'instructor_availability_set', $3::jsonb)
-      `,
-      [
-        crypto.randomUUID(),
-        instructor_id,
-        JSON.stringify({
-          day_of_week,
-          start_time,
-          end_time
-        })
-      ]
-    );
+    await insertEvent(client, {
+
+  id:
+    crypto.randomUUID(),
+
+  identity_id:
+    instructor_id,
+
+  event_type:
+    "instructor_availability_set",
+
+  payload: {
+
+    day_of_week,
+
+    start_time,
+
+    end_time
+
+  }
+
+});
 
     await client.query("COMMIT");
 
@@ -325,5 +384,48 @@ export async function resumeInstructor(req, res) {
 
   } catch (err) {
     res.status(400).json({ error: err.message });
+  }
+}
+
+
+
+export async function updateInstructor(req, res) {
+  const { instructor_id, full_name, phone } = req.body;
+
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    await insertEvent(client, {
+
+  id:
+    generateUUID(),
+
+  identity_id:
+    instructor_id,
+
+  event_type:
+    "instructor_updated",
+
+  payload: {
+
+    full_name,
+
+    phone
+
+  }
+
+});
+
+    await client.query("COMMIT");
+
+    return res.json({ status: "updated" });
+
+  } catch (err) {
+    await client.query("ROLLBACK");
+    res.status(500).json({ error: "update_failed" });
+  } finally {
+    client.release();
   }
 }

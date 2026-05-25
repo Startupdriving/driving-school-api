@@ -1,0 +1,3 @@
+ALTER TABLE lesson_schedule_projection
+ADD CONSTRAINT lesson_schedule_projection_lesson_id_key
+UNIQUE (lesson_id);

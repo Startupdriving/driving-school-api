@@ -4,6 +4,12 @@ import {
   emitToStudent,
   emitToInstructor
 } from "./wsService.js";
+import {
+  assertTransition
+} from "./lifecycleGuards.js";
+import { insertEvent }
+from "./eventStore.js";
+
 
 /* =====================================================
    REQUEST RESCHEDULE
@@ -25,24 +31,52 @@ export async function requestReschedule({
     /* -----------------------------------------------
        1. Load lesson
     ----------------------------------------------- */
+const lessonQuery = await client.query(`
+  SELECT
+    status,
+    instructor_id,
+    student_id,
+    start_time,
+    end_time
+  FROM lesson_schedule_projection
+  WHERE lesson_id = $1
+  LIMIT 1
+`, [lesson_id]);
 
-    const lessonRes = await client.query(`
-      SELECT *
-      FROM lesson_schedule_projection
-      WHERE lesson_request_id = $1
-      LIMIT 1
-    `, [lesson_id]);
+if (lessonQuery.rowCount === 0) {
+  throw new Error("lesson_not_found");
+}
 
-    if (lessonRes.rowCount === 0) {
-      throw new Error("lesson_not_found");
-    }
+const lesson =
+  lessonQuery.rows[0];
 
-    const lesson = lessonRes.rows[0];
+assertTransition(
+  lesson.status,
+  "reschedule_requested"
+);
 
-    if (lesson.status !== "confirmed") {
-      throw new Error("only_confirmed_lessons_can_reschedule");
-    }
+const ownsLesson =
+  lesson.instructor_id === actor_id ||
+  lesson.student_id === actor_id;
 
+if (!ownsLesson) {
+  throw new Error("lesson_not_owned");
+}
+
+const pendingReschedule =
+  await client.query(`
+    SELECT 1
+    FROM lesson_reschedule_projection
+    WHERE lesson_id = $1
+      AND status = 'pending'
+    LIMIT 1
+`, [lesson_id]);
+
+if (pendingReschedule.rowCount > 0) {
+  throw new Error(
+    "reschedule_already_pending"
+  );
+}
     /* -----------------------------------------------
        2. Validate time range
     ----------------------------------------------- */
@@ -66,7 +100,7 @@ export async function requestReschedule({
       SELECT 1
       FROM lesson_schedule_projection
       WHERE instructor_id = $1
-        AND lesson_request_id <> $2
+        AND lesson_id <> $2
         AND status IN ('confirmed','started')
         AND tstzrange(start_time,end_time,'[)') &&
             tstzrange($3::timestamptz,$4::timestamptz,'[)')
@@ -90,7 +124,7 @@ export async function requestReschedule({
       SELECT 1
       FROM lesson_schedule_projection
       WHERE student_id = $1
-        AND lesson_request_id <> $2
+        AND lesson_id <> $2
         AND status IN ('confirmed','started')
         AND tstzrange(start_time,end_time,'[)') &&
             tstzrange($3::timestamptz,$4::timestamptz,'[)')
@@ -110,28 +144,41 @@ export async function requestReschedule({
        5. Insert audit event
     ----------------------------------------------- */
 
-    await client.query(`
-      INSERT INTO event (
-        id,
-        identity_id,
-        event_type,
-        payload
-      )
-      VALUES ($1,$2,'lesson_reschedule_requested',$3)
-    `, [
-      uuidv4(),
-      lesson_id,
-      JSON.stringify({
-        lesson_id,
-        requested_by: actor,
-        requested_by_id: actor_id,
-        current_start_time: lesson.start_time,
-        current_end_time: lesson.end_time,
-        proposed_start_time,
-        proposed_end_time,
-        reason
-      })
-    ]);
+    await insertEvent(client, {
+
+  id: uuidv4(),
+
+  identity_id:
+    lesson_id,
+
+  event_type:
+    "lesson_reschedule_requested",
+
+  payload: {
+
+    lesson_id,
+
+    requested_by:
+      actor,
+
+    requested_by_id:
+      actor_id,
+
+    current_start_time:
+      lesson.start_time,
+
+    current_end_time:
+      lesson.end_time,
+
+    proposed_start_time,
+
+    proposed_end_time,
+
+    reason
+
+  }
+
+});
 
     /* -----------------------------------------------
        6. Upsert projection
@@ -253,7 +300,8 @@ export async function respondReschedule({
     const lessonRes = await client.query(`
       SELECT *
       FROM lesson_schedule_projection
-      WHERE lesson_request_id = $1
+      WHERE lesson_id = $1
+         OR lesson_request_id = $1
       LIMIT 1
     `, [lesson_id]);
 
@@ -263,23 +311,28 @@ export async function respondReschedule({
 
     const lesson = lessonRes.rows[0];
 
+    assertTransition(
+     lesson.status,
+     "reschedule_requested"
+    );
+
+
+
+     const validActor =
+     actor === "student" ||
+     actor === "instructor" ||
+     actor === "admin";
+
+     if (!validActor) {
+     throw new Error("invalid_actor");
+     }
+
+
     /* -----------------------------------------------
        ACCEPT
     ----------------------------------------------- */
 
     if (action === "accept") {
-
-      await client.query(`
-        UPDATE lesson_schedule_projection
-        SET start_time = $1,
-            end_time = $2,
-            updated_at = NOW()
-        WHERE lesson_request_id = $3
-      `, [
-        req.proposed_start_time,
-        req.proposed_end_time,
-        lesson_id
-      ]);
 
       await client.query(`
         UPDATE lesson_reschedule_projection
@@ -289,22 +342,39 @@ export async function respondReschedule({
         WHERE lesson_id = $2
       `, [actor, lesson_id]);
 
-      await client.query(`
-        INSERT INTO event (
-          id,
-          identity_id,
-          event_type,
-          payload
-        )
-        VALUES ($1,$2,'lesson_reschedule_accepted',$3)
-      `, [
-        uuidv4(),
-        lesson_id,
-        JSON.stringify({
-          lesson_id,
-          accepted_by: actor
-        })
-      ]);
+
+      await insertEvent(client, {
+
+  id: uuidv4(),
+
+  identity_id:
+    lesson_id,
+
+  event_type:
+    "lesson_rescheduled",
+
+  payload: {
+
+    lesson_id,
+
+    old_start_time:
+      req.current_start_time,
+
+    old_end_time:
+      req.current_end_time,
+
+    new_start_time:
+      req.proposed_start_time,
+
+    new_end_time:
+      req.proposed_end_time,
+
+    accepted_by:
+      actor
+
+  }
+
+});
 
       await client.query("COMMIT");
 
@@ -335,22 +405,26 @@ export async function respondReschedule({
       WHERE lesson_id = $2
     `, [actor, lesson_id]);
 
-    await client.query(`
-      INSERT INTO event (
-        id,
-        identity_id,
-        event_type,
-        payload
-      )
-      VALUES ($1,$2,'lesson_reschedule_rejected',$3)
-    `, [
-      uuidv4(),
-      lesson_id,
-      JSON.stringify({
-        lesson_id,
-        rejected_by: actor
-      })
-    ]);
+    await insertEvent(client, {
+
+  id: uuidv4(),
+
+  identity_id:
+    lesson_id,
+
+  event_type:
+    "lesson_reschedule_rejected",
+
+  payload: {
+
+    lesson_id,
+
+    rejected_by:
+      actor
+
+  }
+
+});
 
     await client.query("COMMIT");
 

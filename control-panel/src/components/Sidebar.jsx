@@ -38,7 +38,7 @@ export default function Sidebar() {
         <Link to="/lesson" className={item}>Lesson Inspector</Link>
         <Link to="/simulation" className={item}>Simulation</Link>
         <Link to="/maintenance" className={item}>Projection Maintenance</Link>
-
+        <Link to="/governance">  Governance </Link>
       </nav>
 
     </div>

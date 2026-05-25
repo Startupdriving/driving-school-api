@@ -1,22 +1,32 @@
 import { v4 as uuidv4 } from "uuid";
 import { resolveZone } from "./zoneResolver.js";
+import { insertEvent }
+from "./eventStore.js";
+
 
 export async function updateInstructorLocation(client, instructorId, lat, lng) {
 
   // 1️⃣ Insert event
-  await client.query(`
-    INSERT INTO event (
-      id,
-      identity_id,
-      event_type,
-      payload
-    )
-    VALUES ($1,$2,'instructor_location_updated',$3)
-  `,[
+  await insertEvent(client, {
+
+  id:
     uuidv4(),
+
+  identity_id:
     instructorId,
-    JSON.stringify({ lat, lng })
-  ]);
+
+  event_type:
+    "instructor_location_updated",
+
+  payload: {
+
+    lat,
+
+    lng
+
+  }
+
+});
 
   // 2️⃣ Resolve zone
   const zoneId = resolveZone(lat, lng);

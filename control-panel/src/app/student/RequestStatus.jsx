@@ -150,6 +150,55 @@ export default function RequestStatus({
     }
   }
 
+
+async function cancelLesson() {
+
+  try {
+
+    const res = await fetch(
+      "http://localhost:5173/write/lesson/cancel",
+      {
+        method: "POST",
+
+        headers: {
+          "Content-Type": "application/json"
+        },
+
+        body: JSON.stringify({
+        lesson_id: activeLesson.lesson_id,
+        actor: "student",
+        actor_id: profile.id
+       })
+      }
+    );
+
+    const data = await res.json();
+
+    console.log(
+      "CANCEL RESULT:",
+      data
+    );
+
+    if (onRefresh) {
+
+      setTimeout(() => {
+        onRefresh();
+      }, 1500);
+
+    }
+
+  } catch (err) {
+
+    console.error(
+      "CANCEL LESSON ERROR:",
+      err
+    );
+
+  }
+}
+
+
+
   if (loading) {
     return (
       <div className="bg-white rounded-2xl shadow p-5">
@@ -304,6 +353,25 @@ export default function RequestStatus({
                ? new Date(activeLesson.end_time).toLocaleTimeString()
                : "-"}
               </p>
+
+
+{activeLesson?.status === "confirmed" && (
+  <button
+    onClick={cancelLesson}
+    className="
+      mt-4
+      px-4
+      py-2
+      bg-red-600
+      text-white
+      rounded
+    "
+  >
+    Cancel Lesson
+  </button>
+)}
+           
+
 
             {activeLesson?.status === "confirmed" &&
  activeLesson?.lesson_id && (

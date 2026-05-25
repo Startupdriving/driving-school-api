@@ -1,5 +1,8 @@
 import pool from "../db.js";
 import crypto from "crypto";
+import { insertEvent }
+from "./eventStore.js";
+
 
 function generateUUID() {
   return crypto.randomUUID();
@@ -28,19 +31,31 @@ export async function createCar(req, res) {
       [carId]
     );
 
-    await client.query(
-      `INSERT INTO event (id, identity_id, event_type, payload)
-       VALUES ($1, $2, 'car_created', $3::jsonb)`,
-      [
-        generateUUID(),
-        carId,
-        JSON.stringify({
-          performed_by: "system",
-          source: "api",
-          action: "car_created"
-        })
-      ]
-    );
+    await insertEvent(client, {
+
+  id:
+    generateUUID(),
+
+  identity_id:
+    carId,
+
+  event_type:
+    "car_created",
+
+  payload: {
+
+    performed_by:
+      "system",
+
+    source:
+      "api",
+
+    action:
+      "car_created"
+
+  }
+
+});
 
     await client.query("COMMIT");
 
@@ -86,19 +101,31 @@ export async function activateCar(req, res) {
       return res.status(400).json({ error: "Car already active" });
     }
 
-    await client.query(
-      `INSERT INTO event (id, identity_id, event_type, payload)
-       VALUES ($1, $2, 'car_activated', $3::jsonb)`,
-      [
-        generateUUID(),
-        car_id,
-        JSON.stringify({
-          performed_by: "system",
-          source: "api",
-          action: "car_activated"
-        })
-      ]
-    );
+    await insertEvent(client, {
+
+  id:
+    generateUUID(),
+
+  identity_id:
+    car_id,
+
+  event_type:
+    "car_activated",
+
+  payload: {
+
+    performed_by:
+      "system",
+
+    source:
+      "api",
+
+    action:
+      "car_activated"
+
+  }
+
+});
 
     await client.query("COMMIT");
 
@@ -141,21 +168,28 @@ export async function setCarAvailability(req, res) {
       throw new Error("Car not found");
     }
 
-    await client.query(
-      `
-      INSERT INTO event (id, identity_id, event_type, payload)
-      VALUES ($1, $2, 'car_availability_set', $3::jsonb)
-      `,
-      [
-        generateUUID(),
-        car_id,
-        JSON.stringify({
-          day_of_week,
-          start_time,
-          end_time
-        })
-      ]
-    );
+    await insertEvent(client, {
+
+  id:
+    generateUUID(),
+
+  identity_id:
+    car_id,
+
+  event_type:
+    "car_availability_set",
+
+  payload: {
+
+    day_of_week,
+
+    start_time,
+
+    end_time
+
+  }
+
+});
 
     await client.query("COMMIT");
 

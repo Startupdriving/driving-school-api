@@ -1,6 +1,10 @@
 import pool from "../db.js";
 import { v4 as uuidv4 } from "uuid";
 import { sendNextWaveOffers } from "./dispatchWorker.js";
+import { insertEvent }
+from "./eventStore.js";
+
+
 
 export async function simulateDispatchRequests(count, zoneId) {
 
@@ -25,22 +29,28 @@ console.log("🔥 FUNCTION ENTERED simulateDispatchRequests");
         VALUES ($1,'lesson_request')
       `,[requestId]);
 
-      await client.query(`
-        INSERT INTO event (
-          id,
-          identity_id,
-          event_type,
-          payload
-        )
-        VALUES ($1,$2,'lesson_requested',$3)
-      `,[
-        uuidv4(),
-        requestId,
-        JSON.stringify({
-          student_id: uuidv4(),
-          zone_id: zoneId
-        })
-      ]);
+      await insertEvent(client, {
+
+  id:
+    uuidv4(),
+
+  identity_id:
+    requestId,
+
+  event_type:
+    "lesson_requested",
+
+  payload: {
+
+    student_id:
+      uuidv4(),
+
+    zone_id:
+      zoneId
+
+  }
+
+});
 
        console.log("👉 ABOUT TO CALL DISPATCH:", requestId);
 

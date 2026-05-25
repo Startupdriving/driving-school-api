@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react"
 import { getSystemHealth } from "../api/adminApi"
 import StatCard from "../components/StatCard"
+import GovernanceDashboard
+from "../components/admin/governance/GovernanceDashboard";
+
 
 export default function Dashboard() {
 
@@ -20,6 +23,8 @@ export default function Dashboard() {
   if (!data) return <div>Loading system health...</div>
 
   return (
+
+  <div className="space-y-6">
 
     <div className="grid grid-cols-4 gap-4">
 
@@ -45,5 +50,7 @@ export default function Dashboard() {
 
     </div>
 
-  )
+  </div>
+
+)
 }

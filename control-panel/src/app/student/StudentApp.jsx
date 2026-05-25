@@ -81,13 +81,15 @@ export default function StudentApp() {
       "lesson_cancelled",
       "offer_countered",
       "offer_sent",
+      "lesson_reschedule_requested",
       "lesson_rescheduled"
+      
     ].includes(data.type)
   ) {
     console.log("🔄 STUDENT REFRESH");
 
     setTimeout(() => {
-     fetchActiveLesson(); },  700);
+     fetchActiveLesson(); },  1500);
   }
 };
 

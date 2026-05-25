@@ -4,6 +4,7 @@ import { updateInstructorLocation } from "./services/instructorLocationService.j
 import { rebuildLiquidity } from "./services/liquidityService.js";
 import paymentRoutes from "./routes/payment.js";
 import { startDispatchWorker } from "./services/dispatchWorker.js";
+import { startEventDispatcher } from "./services/eventDispatcher.js";
 import matchingRoutes from "./routes/matching.js";
 import lessonRequestRoutes from "./routes/lessonRequest.js";
 import lessonRoutes from "./routes/lesson.js";
@@ -20,6 +21,8 @@ import rescheduleRoutes from "./routes/reschedule.js";
 import { WebSocketServer } from "ws";
 import { registerClient, removeClient } from "./services/wsService.js";
 import http from "http";
+import adminProjectionRoutes
+from "./routes/adminProjection.js";
 
 dotenv.config();
 
@@ -50,7 +53,7 @@ app.use("/write/offer", offerRoutes);
 app.use("/write/reschedule", rescheduleRoutes);
 
 app.use("/admin", adminRoutes);
-
+app.use( "/admin", adminProjectionRoutes);
 
 const PORT = process.env.PORT || 5173;
 
@@ -93,6 +96,7 @@ server.listen(PORT, () => {
 
 // start workers
 startDispatchWorker();
+startEventDispatcher();
 
 // liquidity scheduler
 setInterval(async () => {

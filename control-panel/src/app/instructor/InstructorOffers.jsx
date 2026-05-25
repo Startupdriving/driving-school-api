@@ -259,8 +259,9 @@ const cancelLesson = async () => {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      instructor_id: instructorId,
-      lesson_id: dashboard.active_lesson.lesson_id
+    lesson_id: dashboard.active_lesson.lesson_id,
+    actor: "instructor",
+    actor_id: instructorId
     })
   });
 
@@ -320,12 +321,13 @@ console.log("🔥 RAW WS MESSAGE:", event.data);
       data.type === "lesson_started"  ||
       data.type === "lesson_completed" ||
       data.type === "lesson_cancelled" ||
+      data.type === "lesson_reschedule_requested" ||
       data.type === "lesson_rescheduled"  
  ) {
      console.log("🔄 DASHBOARD REFRESH");
 
     setTimeout(() => {
-    fetchDashboard(); }, 700);
+    fetchDashboard(); }, 1500);
    }
   };
 

@@ -1,13 +1,17 @@
 import { v4 as uuidv4 } from "uuid";
 import { insertEvent } from "./eventStore.js";
 
-// 🎯 CENTRAL LESSON CREATION ENGINE
+// 🧠 CENTRAL LESSON CREATION ENGINE
 export async function createLesson(client, {
+  lesson_request_id,
   student_id,
   instructor_id,
   start_time,
   end_time,
-  price = null
+  price,
+
+  parent_event_id,
+    correlation_id
 }) {
 
   // 🧠 STEP 1 — OVERLAP CHECK
@@ -30,85 +34,46 @@ export async function createLesson(client, {
 
   // 🧠 STEP 3 — CREATE IDENTITY
   await client.query(`
-    INSERT INTO identity (id, identity_type)
+    INSERT INTO identity (
+      id,
+      identity_type
+    )
     VALUES ($1, 'lesson')
   `, [lessonId]);
 
- 
+  // 🧠 STEP 4 — INSERT EVENT ONLY
+  const startIso = new Date(start_time).toISOString();
+  const endIso = new Date(end_time).toISOString();
 
- // 🧠 STEP 4 — INSERT EVENT
-const startIso = new Date(start_time).toISOString();
-const endIso = new Date(end_time).toISOString();
+  await insertEvent(client, {
+    id: lessonId,
 
-await insertEvent(client, {
-  id: lessonId,
-  identity_id: lessonId,
-  event_type: "lesson_created",
-  payload: {
-    student_id,
-    instructor_id,
-    start_time: startIso,
-    end_time: endIso,
-    price
-  },
-  instructor_id,
-  lesson_range: `[${startIso},${endIso})`
-});
+    identity_id: lessonId,
 
-  // 🧠 STEP 5 — UPSERT SCHEDULE PROJECTION
-  await client.query(`
-    INSERT INTO lesson_schedule_projection (
+    event_type: "lesson_created",
+
+   correlation_id,
+   causation_id:
+   parent_event_id,
+
+
+    payload: {
       lesson_request_id,
-      instructor_id,
       student_id,
-      start_time,
-      end_time,
-      status,
-      created_at,
-      updated_at
-    )
-    VALUES ($1,$2,$3,$4,$5,'confirmed',NOW(),NOW())
-    ON CONFLICT (lesson_request_id)
-    DO UPDATE SET
-      instructor_id = EXCLUDED.instructor_id,
-      student_id = EXCLUDED.student_id,
-      start_time = EXCLUDED.start_time,
-      end_time = EXCLUDED.end_time,
-      status = 'confirmed',
-      updated_at = NOW()
-  `, [
-    lessonId,
-    instructor_id,
-    student_id,
-    start_time,
-    end_time
-  ]);
+      instructor_id,
+      start_time: startIso,
+      end_time: endIso,
+      price
+    },
 
-  // 🧠 STEP 6 — UPDATE STUDENT STATE
-  await client.query(`
-    INSERT INTO student_active_lesson_projection (
-      student_id,
-      lesson_request_id,
-      lesson_id,
-      status,
-      instructor_id,
-      confirmed_at,
-      updated_at
-    )
-    VALUES ($1, $2, $3, 'confirmed', $4, NOW(), NOW())
-    ON CONFLICT (student_id)
-    DO UPDATE SET
-      lesson_id = EXCLUDED.lesson_id,
-      instructor_id = EXCLUDED.instructor_id,
-      status = 'confirmed',
-      confirmed_at = NOW(),
-      updated_at = NOW()
-  `, [
-    student_id,
-    lessonId,
-    lessonId,
-    instructor_id
-  ]);
+    instructor_id,
+
+    lesson_range: `[${startIso},${endIso})`
+  });
+
+  // 🧠 IMPORTANT:
+  // Projections are now owned ONLY by eventHandler.js
+  // DO NOT mutate projections here anymore.
 
   return lessonId;
 }

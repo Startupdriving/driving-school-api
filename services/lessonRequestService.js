@@ -4,7 +4,12 @@ import { v4 as uuidv4 } from "uuid";
 import { withIdempotency } from "./idempotencyService.js";
 import crypto from "crypto";
 import { upsertStudentState } from '../services/studentProjectionWriter.js';
+import { insertEvent } from "./eventStore.js";
+import {
 
+  enforceSingleActiveLessonInvariant
+
+} from "./projectionIntegrityEnforcementService.js";
 
 
 function generateUUID() {
@@ -66,6 +71,8 @@ export async function requestLesson(req, res) {
 
       const requestId = generateUUID();
 
+      const rootEventId = uuidv4();
+
       // Create identity
       await client.query(
         `INSERT INTO identity (id, identity_type)
@@ -87,33 +94,29 @@ const zoneId = zoneRows.length > 0
 
       // 1️⃣ Insert lesson_requested event
 console.log("INSERT lesson_requested event");
+     const lessonRequestedEvent =
+      await insertEvent(client, {
 
-      await client.query(
-  `INSERT INTO event (
-     id,
-     identity_id,
-     event_type,
-     payload
-   )
-   VALUES (
-     $1,
-     $2,
-     'lesson_requested',
-     $3
-   )`,
-  [
-    uuidv4(),
-    requestId,
-    JSON.stringify({
-      student_id,
-      requested_start_time,
-      requested_end_time,
-      pickup_lat,
-      pickup_lng,
-      zone_id: zoneId
-    })
-  ]
-);
+  id: rootEventId,
+
+  identity_id: requestId,
+
+  event_type: "lesson_requested",
+
+  correlation_id: rootEventId,
+
+  causation_id: null,
+
+  payload: {
+    student_id,
+    requested_start_time,
+    requested_end_time,
+    pickup_lat,
+    pickup_lng,
+    zone_id: zoneId
+  }
+
+});
 
 
 // 🧠 NEGOTIATION PROJECTION INSERT (FIRST STATE)
@@ -151,14 +154,15 @@ if (existingNegotiation.rowCount === 0) {
       $3, $4,
       $3, $4,
       0,
-      NOW(),
-      NOW()
+      $5,
+      $5
     )
   `, [
     requestId,
     student_id,
     requested_start_time,
-    requested_end_time
+    requested_end_time,
+    lessonRequestedEvent.created_at
   ]);
 
 } else {
@@ -193,14 +197,19 @@ await upsertStudentState(client, {
   student_id,
   lesson_request_id: requestId,
   status: 'searching',
-  requested_at: new Date(),
+
+  requested_at:
+    lessonRequestedEvent.created_at,
+
+
   lesson_id: null,
   instructor_id: null,
   confirmed_at: null,
   started_at: null,
   completed_at: null,
   cancelled_at: null
-});
+},
+  lessonRequestedEvent.created_at);
 
 console.log("🔥 RESET STUDENT STATE:", student_id);
 
@@ -374,45 +383,86 @@ export async function acceptOffer(req, res) {
 
       const { start_time, end_time, student_id } = requestInfo.rows[0];
 
+// =====================================================
+// PROJECTION INTEGRITY ENFORCEMENT
+// =====================================================
+
+await enforceSingleActiveLessonInvariant(
+
+  client,
+  student_id
+
+);
+
+      const parentEventRes =
+  await client.query(`
+    SELECT
+      id,
+      correlation_id
+    FROM event
+    WHERE identity_id = $1::uuid
+      AND event_type = 'lesson_offer_sent'
+    ORDER BY sequence_number ASC
+    LIMIT 1
+`, [offer_id]);
+
+const parentEvent =
+  parentEventRes.rows[0];
+
+
       // Insert lesson_offer_accepted
-      await client.query(
-        `
-        INSERT INTO event (
-          id,
-          identity_id,
-          event_type,
-          instructor_id,
-          payload
-        )
-        VALUES ($1, $2, 'lesson_offer_accepted', $3, $4)
-        `,
-        [
-          generateUUID(),
-          requestId,
-          instructorId,
-          JSON.stringify({ wave: currentWave })
-        ]
-      );
+      const acceptedEventId =
+  generateUUID();
+
+await insertEvent(client, {
+
+  id: acceptedEventId,
+
+  identity_id: requestId,
+
+  event_type:
+    "lesson_offer_accepted",
+
+  correlation_id:
+    parentEvent.correlation_id,
+
+  causation_id:
+    parentEvent.id,
+
+  instructor_id:
+    instructorId,
+
+  payload: {
+    wave: currentWave
+  }
+
+});
 
       // Insert lesson_confirmed
-      await client.query(
-        `
-        INSERT INTO event (
-          id,
-          identity_id,
-          event_type,
-          instructor_id,
-          payload
-        )
-        VALUES ($1, $2, 'lesson_confirmed', $3, $4)
-        `,
-        [
-          generateUUID(),
-          requestId,
-          instructorId,
-          JSON.stringify({ wave: currentWave })
-        ]
-      );
+   const lessonConfirmedEvent = 
+     await insertEvent(client, {
+
+  id: generateUUID(),
+
+  identity_id: requestId,
+
+  event_type:
+    "lesson_confirmed",
+
+  correlation_id:
+    parentEvent.correlation_id,
+
+  causation_id:
+    acceptedEventId,
+
+  instructor_id:
+    instructorId,
+
+  payload: {
+    wave: currentWave
+  }
+
+});
 
 
 // ✅ STUDENT PROJECTION UPDATE (confirmed)
@@ -423,8 +473,10 @@ if (studentId) {
   await updateStudentState(client, studentId, {
     status: 'confirmed',
     instructor_id: instructorId,
-    confirmed_at: new Date()
-  });
+    confirmed_at:
+    lessonConfirmedEvent.created_at
+  },
+    lessonConfirmedEvent.created_at);
 }
 
 
@@ -441,67 +493,38 @@ await client.query(
 );
 
       // Create lesson identity
-      const lessonId = uuidv4();
-console.log("🔥 INSERT 339 HIT");
-await client.query(`
-INSERT INTO identity(id, identity_type)
-VALUES ($1,'lesson')
-`, [lessonId]);
-
-await client.query(`
-INSERT INTO event (
-  id,
-  identity_id,
-  event_type,
-  instructor_id,
-  payload
-)
-VALUES ($1,$2,'lesson_created',$3,$4)
-`, [
-  uuidv4(),
-  lessonId,
-  instructorId,
-  JSON.stringify({ lesson_request_id: requestId })
-]);
-
       // Insert lesson_scheduled
-await client.query(
-  `
-  INSERT INTO event (
-    id,
-    identity_id,
-    event_type,
-    payload,
-    instructor_id,
-    car_id,
-    lesson_range
-  )
-  VALUES (
-    $1,
-    $1,
-    'lesson_scheduled',
-    $2,
-    $3,
-    $4,
-    tstzrange($5::timestamptz, $6::timestamptz)
-  )
-  `,
-  [
-    lessonId,
-    JSON.stringify({
-      student_id,
-      instructor_id: instructorId,
-      car_id: carId,
-      start_time,
-      end_time
-    }),
-    instructorId,
-    carId,
+
+await insertEvent(client, {
+
+  id: lessonId,
+
+  identity_id: lessonId,
+
+  event_type:
+    "lesson_scheduled",
+
+  payload: {
+    lesson_request_id,
+    student_id,
+
+    instructor_id:
+      instructorId,
+
+    car_id:
+      carId,
+
     start_time,
     end_time
-  ]
-);
+  },
 
+  instructor_id:
+    instructorId,
+
+  lesson_range:
+    `[${start_time},${end_time})`
+
+});
 
 // 🔹 Fetch zone_id from lesson request
 const { rows: zoneRows } = await client.query(`
@@ -535,26 +558,22 @@ if (zoneId) {
 const basePrice = 2000; // PKR base price
 const lessonPrice = Math.round(basePrice * surgeMultiplier);
 
-// Insert lesson_price_calculated under lesson identity
-await client.query(
-  `
-  INSERT INTO event (
-    id,
-    identity_id,
-    event_type,
-    payload
-  )
-  VALUES ($1, $2, 'lesson_price_calculated', $3)
-  `,
-  [
-    generateUUID(),
-    lessonId,
-    JSON.stringify({
-      price: lessonPrice,
-      currency: "PKR"
-    })
-  ]
-);
+// lesson_price_calculated under lesson identity
+await insertEvent(client, {
+
+  id: generateUUID(),
+
+  identity_id: lessonId,
+
+  event_type:
+    "lesson_price_calculated",
+
+  payload: {
+    price: lessonPrice,
+    currency: "PKR"
+  }
+
+});
 
 // 2️⃣ Create payment identity
 const paymentId = generateUUID();
@@ -568,47 +587,39 @@ await client.query(
 );
 
 // 3️⃣ Insert payment_created
-await client.query(
-  `
-  INSERT INTO event (
-    id,
-    identity_id,
-    event_type,
-    payload
-  )
-  VALUES ($1, $2, 'payment_created', $3)
-  `,
-  [
-    generateUUID(),
-    paymentId,
-    JSON.stringify({
-  base_price: basePrice,
-  surge_multiplier: surgeMultiplier,
-  final_price: lessonPrice,
-  currency: "PKR"
-})
-  ]
-);
+await insertEvent(client, {
 
-// 4️⃣ Insert payment_requested
-await client.query(
-  `
-  INSERT INTO event (
-    id,
-    identity_id,
-    event_type,
-    payload
-  )
-  VALUES ($1, $2, 'payment_requested', $3)
-  `,
-  [
-    generateUUID(),
-    paymentId,
-    JSON.stringify({
-      lesson_id: lessonId
-    })
-  ]
-);
+  id: generateUUID(),
+
+  identity_id: paymentId,
+
+  event_type:
+    "payment_created",
+
+  payload: {
+    base_price: basePrice,
+    surge_multiplier: surgeMultiplier,
+    final_price: lessonPrice,
+    currency: "PKR"
+  }
+
+});
+
+// 4️⃣ Ipayment_requested
+await insertEvent(client, {
+
+  id: generateUUID(),
+
+  identity_id: paymentId,
+
+  event_type:
+    "payment_requested",
+
+  payload: {
+    lesson_id: lessonId
+  }
+
+});
 
 // ============================
 // FINANCIAL ENGINE END

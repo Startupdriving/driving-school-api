@@ -1,5 +1,9 @@
 import pool from "../db.js";
 import crypto from "crypto";
+import { handleEvent } from "./eventHandler.js";
+import { insertEvent }
+from "./eventStore.js";
+
 
 function generateUUID() {
   return crypto.randomUUID();
@@ -27,29 +31,53 @@ if (!req.body.full_name) {
 
     const studentId = generateUUID();
 
+
+        await client.query(`
+      INSERT INTO identity (id, identity_type)
+      VALUES ($1, 'student')
+      ON CONFLICT DO NOTHING
+    `, [studentId]);
+
+
+
+
     await client.query(
       `INSERT INTO identity (id, identity_type)
        VALUES ($1, 'student')`,
       [studentId]
     );
 
-    await client.query(
-      `INSERT INTO event (id, identity_id, event_type, payload)
-       VALUES ($1, $2, 'student_created', $3::jsonb)`,
-      [
-        generateUUID(),
-        studentId,
-        JSON.stringify({
-        performed_by: "system",
-        source: "api",
-        action: "student_created",
+    await insertEvent(client, {
 
-    // ✅ ADD THESE
-        full_name: req.body.full_name,
-        phone: req.body.phone || null
-       })
-      ]
-    );
+  id:
+    generateUUID(),
+
+  identity_id:
+    studentId,
+
+  event_type:
+    "student_created",
+
+  payload: {
+
+    performed_by:
+      "system",
+
+    source:
+      "api",
+
+    action:
+      "student_created",
+
+    full_name:
+      req.body.full_name,
+
+    phone:
+      req.body.phone || null
+
+  }
+
+});
 
     await client.query("COMMIT");
 
@@ -93,19 +121,31 @@ export async function activateStudent(req, res) {
       return res.status(400).json({ error: "Student already active" });
     }
 
-    await client.query(
-      `INSERT INTO event (id, identity_id, event_type, payload)
-       VALUES ($1, $2, 'student_activated', $3::jsonb)`,
-      [
-        generateUUID(),
-        student_id,
-        JSON.stringify({
-          performed_by: "system",
-          source: "api",
-          action: "student_activated"
-        })
-      ]
-    );
+    await insertEvent(client, {
+
+  id:
+    generateUUID(),
+
+  identity_id:
+    student_id,
+
+  event_type:
+    "student_activated",
+
+  payload: {
+
+    performed_by:
+      "system",
+
+    source:
+      "api",
+
+    action:
+      "student_activated"
+
+  }
+
+});
 
     await client.query("COMMIT");
 
@@ -146,19 +186,31 @@ export async function deactivateStudent(req, res) {
       return res.status(400).json({ error: "Student already inactive" });
     }
 
-    await client.query(
-      `INSERT INTO event (id, identity_id, event_type, payload)
-       VALUES ($1, $2, 'student_deactivated', $3::jsonb)`,
-      [
-        generateUUID(),
-        student_id,
-        JSON.stringify({
-          performed_by: "system",
-          source: "api",
-          action: "student_deactivated"
-        })
-      ]
-    );
+    await insertEvent(client, {
+
+  id:
+    generateUUID(),
+
+  identity_id:
+    student_id,
+
+  event_type:
+    "student_deactivated",
+
+  payload: {
+
+    performed_by:
+      "system",
+
+    source:
+      "api",
+
+    action:
+      "student_deactivated"
+
+  }
+
+});
 
     await client.query("COMMIT");
 
@@ -172,3 +224,49 @@ export async function deactivateStudent(req, res) {
   }
 }
 
+
+export async function updateStudent(req, res) {
+  const { student_id, full_name, phone } = req.body;
+
+  if (!student_id) {
+    return res.status(400).json({ error: "student_id required" });
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    await insertEvent(client, {
+
+  id:
+    generateUUID(),
+
+  identity_id:
+    student_id,
+
+  event_type:
+    "student_updated",
+
+  payload: {
+
+    full_name,
+
+    phone
+
+  }
+
+});
+
+    await client.query("COMMIT");
+
+    return res.json({ status: "updated" });
+
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error(err);
+    res.status(500).json({ error: "update_failed" });
+  } finally {
+    client.release();
+  }
+}

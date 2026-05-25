@@ -14,6 +14,14 @@ import {
 } from "../services/studentService.js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import { updateStudent } from "../services/studentService.js";
+import { replayDeadEvent } from "../services/replayService.js";
+import { handleEvent }
+  from "../services/eventHandler.js";
+import {
+  handleReliabilityProjection
+} from "../services/reliabilityProjectionHandler.js";
+
 
 
 const router = express.Router();
@@ -22,6 +30,136 @@ router.post("/student/create", createStudent);
 router.post("/student/activate", activateStudent);
 router.post("/student/deactivate", deactivateStudent);
 router.post("/instructor/availability", setInstructorAvailability);
+router.post("/student/update", updateStudent);
+router.post("/dead-event/replay", replayDeadEvent);
+
+
+router.post(
+  "/test-reliability-idempotency",
+  async (req, res) => {
+
+    const client =
+      await pool.connect();
+
+    try {
+
+      const eventRes =
+        await client.query(`
+          SELECT *
+          FROM event
+          WHERE id = $1
+          LIMIT 1
+        `, [
+          '3da6f914-9a96-47e5-b69d-d075b3ea2eb2'
+        ]);
+
+      const event =
+        eventRes.rows[0];
+
+      await client.query("BEGIN");
+
+      await handleReliabilityProjection(
+        client,
+        event,
+        { replay: true }
+      );
+
+      await handleReliabilityProjection(
+        client,
+        event,
+        { replay: true }
+      );
+
+      await client.query("COMMIT");
+
+      res.json({
+        success: true
+      });
+
+    } catch (err) {
+
+      await client.query(
+        "ROLLBACK"
+      );
+
+      console.error(err);
+
+      res.status(500).json({
+        error: err.message
+      });
+
+    } finally {
+
+      client.release();
+
+    }
+
+});
+
+
+
+router.post(
+  "/test-projection-idempotency",
+  async (req, res) => {
+
+    const client =
+      await pool.connect();
+
+    try {
+
+      const eventRes =
+        await client.query(`
+          SELECT *
+          FROM event
+          WHERE id = $1
+          LIMIT 1
+        `, [
+          '3da6f914-9a96-47e5-b69d-d075b3ea2eb2'
+        ]);
+
+      const event =
+        eventRes.rows[0];
+
+      await client.query("BEGIN");
+
+      await handleEvent(
+        client,
+        event,
+         { replay: true }
+      );
+
+      await handleEvent(
+        client,
+        event,
+          { replay: true }
+
+      );
+
+      await client.query("COMMIT");
+
+      res.json({
+        success: true
+      });
+
+    } catch (err) {
+
+      await client.query(
+        "ROLLBACK"
+      );
+
+      console.error(err);
+
+      res.status(500).json({
+        error: err.message
+      });
+
+    } finally {
+
+      client.release();
+
+    }
+
+});
 
 
 router.post("/student/signup", async (req, res) => {
@@ -196,190 +334,30 @@ router.post("/student/login", async (req, res) => {
 
 router.post("/admin/rebuild-projections", async (req, res) => {
   console.log("🔥 REBUILD ROUTE HIT")
+
   try {
+
     await rebuildProjections();
-    res.json({ success: true });
-  } catch (err) {
-    console.error("Rebuild failed:", err);
-    res.status(500).json({ error: "Rebuild failed" });
-  }
-});
-
-
-router.post("/instructor/accept-offer", async (req, res) => {
-  const { instructor_id, lesson_request_id } = req.body;
-
-  if (!instructor_id || !lesson_request_id) {
-    return res.status(400).json({
-      error: "missing_fields"
-    });
-  }
-
-  const client = await pool.connect();
-
-  try {
-    await client.query("BEGIN");
-
-    // 1. Offer must exist
-    const offerCheck = await client.query(`
-      SELECT 1
-      FROM instructor_offers_projection
-      WHERE instructor_id = $1
-        AND lesson_request_id = $2
-      LIMIT 1
-    `, [instructor_id, lesson_request_id]);
-
-    if (offerCheck.rowCount === 0) {
-      throw new Error("offer_not_found");
-    }
-
-    // 2. Prevent double confirm
-    const alreadyConfirmed = await client.query(`
-      SELECT 1
-      FROM event
-      WHERE identity_id = $1
-        AND event_type = 'lesson_confirmed'
-      LIMIT 1
-    `, [lesson_request_id]);
-
-    if (alreadyConfirmed.rowCount > 0) {
-      throw new Error("lesson_already_confirmed");
-    }
-
-    // 3. Accept event
-    await client.query(`
-      INSERT INTO event (
-        id,
-        identity_id,
-        event_type,
-        instructor_id,
-        payload
-      )
-      VALUES ($1,$2,'lesson_offer_accepted',$3,$4)
-    `, [
-      uuidv4(),
-      lesson_request_id,
-      instructor_id,
-      JSON.stringify({
-        instructor_id,
-        lesson_request_id
-      })
-    ]);
-
-    // 4. Confirm event
-    const confirmRes = await client.query(`
-      INSERT INTO event (
-        id,
-        identity_id,
-        event_type,
-        instructor_id,
-        payload
-      )
-      VALUES ($1,$2,'lesson_confirmed',$3,$4)
-      RETURNING created_at
-    `, [
-      uuidv4(),
-      lesson_request_id,
-      instructor_id,
-      JSON.stringify({
-        instructor_id,
-        lesson_request_id
-      })
-    ]);
-
-    const confirmedAt = confirmRes.rows[0].created_at;
-
-    // 5. Create lesson identity
-    const lesson_id = uuidv4();
-
-    await client.query(`
-      INSERT INTO identity (id, identity_type)
-      VALUES ($1, 'lesson')
-    `, [lesson_id]);
-
-    // 6. lesson_created event (CRITICAL)
-    await client.query(`
-      INSERT INTO event (
-        id,
-        identity_id,
-        event_type,
-        instructor_id,
-        payload
-      )
-      VALUES ($1,$2,'lesson_created',$3,$4)
-    `, [
-      uuidv4(),
-      lesson_id,
-      instructor_id,
-      JSON.stringify({
-        lesson_id,
-        lesson_request_id,
-        instructor_id
-      })
-    ]);
-
-    // 7. Confirm projection
-    await client.query(`
-      UPDATE lesson_schedule_projection
-      SET status = 'confirmed',
-          updated_at = NOW()
-      WHERE lesson_request_id = $1
-    `, [lesson_request_id]);
-
-    // 8. Remove competing offers
-    await client.query(`
-      DELETE FROM instructor_offers_projection
-      WHERE lesson_request_id = $1
-    `, [lesson_request_id]);
-
-    // 9. Student state update
-    const studentId = await findStudentByRequest(
-      client,
-      lesson_request_id
-    );
-
-    if (studentId) {
-      await updateStudentState(client, studentId, {
-        status: "confirmed",
-        instructor_id,
-        lesson_id,
-        confirmed_at: confirmedAt,
-        started_at: null,
-        completed_at: null,
-        cancelled_at: null
-      });
-    }
-
-    await client.query("COMMIT");
-
-    // Emit AFTER commit
-    if (studentId) {
-      emitToStudent(studentId, {
-        type: "student_update"
-      });
-    }
-
-    emitToInstructor(instructor_id, {
-      type: "dashboard_update"
-    });
 
     res.json({
-      status: "offer_accepted",
-      lesson_id
+      success: true
     });
 
   } catch (err) {
-    await client.query("ROLLBACK");
-    console.error("❌ ACCEPT ERROR:", err);
+
+    console.error(
+      "Rebuild failed:",
+      err
+    );
 
     res.status(500).json({
-      error: err.message
+      error: "Rebuild failed"
     });
 
-  } finally {
-    client.release();
   }
 });
+
+
 
 router.post("/instructor/login", async (req, res) => {
   try {

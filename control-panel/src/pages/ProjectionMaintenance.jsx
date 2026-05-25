@@ -1,5 +1,14 @@
 import { useState } from "react"
 import { rebuildProjections } from "../api/adminApi"
+import ProjectionHealthTable
+from "../components/admin/ProjectionHealthTable";
+import DeadEventTable
+from "../components/admin/DeadEventTable";
+import EventStreamTable
+from "../components/admin/EventStreamTable";
+import EntityTimeline
+from "../components/admin/EntityTimeline";
+
 
 export default function ProjectionMaintenance() {
 
@@ -28,7 +37,10 @@ export default function ProjectionMaintenance() {
   return (
 
     <div className="bg-white shadow rounded p-4 space-y-4">
-
+         <ProjectionHealthTable />
+         <DeadEventTable />
+         <EventStreamTable />
+         <EntityTimeline />
       <h2 className="text-lg font-semibold">
         Projection Maintenance
       </h2>
