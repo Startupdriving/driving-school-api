@@ -23,6 +23,18 @@ import { registerClient, removeClient } from "./services/wsService.js";
 import http from "http";
 import adminProjectionRoutes
 from "./routes/adminProjection.js";
+import packageRoutes from "./routes/packageRoutes.js";
+
+
+const { rows } = await pool.query(`
+  SELECT
+    current_database(),
+    current_user,
+    inet_server_addr(),
+    inet_server_port()
+`);
+
+console.log("NODE DATABASE INFO:", rows[0]);
 
 dotenv.config();
 
@@ -51,6 +63,11 @@ app.use("/write/lesson-request", lessonRequestRoutes);
 app.use("/write/payment", paymentRoutes);
 app.use("/write/offer", offerRoutes);
 app.use("/write/reschedule", rescheduleRoutes);
+
+app.use(
+  "/package",
+  packageRoutes
+);
 
 app.use("/admin", adminRoutes);
 app.use( "/admin", adminProjectionRoutes);

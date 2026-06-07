@@ -87,6 +87,22 @@ const nextVersion =
 
   console.log("📡 EVENT INSERTED:", event_type);
 
+const verify = await client.query(`
+  SELECT
+    id,
+    sequence_number,
+    event_type,
+    processed
+  FROM event
+  WHERE id = $1
+`, [rows[0].id]);
+
+console.log(
+  "INSERT VERIFY:",
+  verify.rows[0]
+);
+
+
    return rows[0];
 
 }

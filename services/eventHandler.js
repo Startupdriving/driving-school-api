@@ -4,6 +4,8 @@ import {  updateProjectionCheckpoint } from "./projectionCheckpointService.js";
 import {
   processProjectionEvent
 } from "./projectionPipelineService.js";
+console.log("EVENT HANDLER FILE LOADED");
+
 
 export async function handleEvent(
   client,
@@ -11,6 +13,17 @@ export async function handleEvent(
   options = {}
 ) {
 
+ console.log(
+    "HANDLE EVENT ROUTER:",
+    event.event_type,
+    event.sequence_number
+  );
+
+  console.log(
+    "HANDLE EVENT ENTER:",
+    event.event_type,
+    event.sequence_number
+  );
   const { replay = false } = options;
 
   const { event_type } = event;
@@ -41,6 +54,30 @@ case 'instructor_online':
       await handleInstructorCreated(client, event);
     break;
 
+    case "package_created":
+  await handlePackageCreated(
+       client,
+       event,
+       replay
+      );
+    break;
+
+
+case "package_updated":
+  await handlePackageUpdated(
+    client,
+    event,
+    replay
+  );
+break;
+
+case "package_deactivated":
+  await handlePackageDeactivated(
+    client,
+    event,
+    replay
+  );
+break;
 
     case 'student_updated':
       await handleStudentUpdated(client, event);
@@ -1081,5 +1118,247 @@ async function handleInstructorOnline(
     "instructor_runtime_state_projection",
     seq
   );
+
+}
+
+
+
+async function handlePackageCreated(
+  client,
+  event,
+  replay = false
+) {
+
+  console.log(
+    "PACKAGE HANDLER RUNNING",
+    event.identity_id
+  );
+
+  const seq =
+    Number(event.sequence_number);
+
+  const payload =
+    event.payload;
+
+  await processProjectionEvent({
+
+    client,
+
+    projectionName:
+      "package_projection",
+
+    event,
+
+    replay,
+
+    processor: async () => {
+
+  const result =  await client.query(`
+
+        INSERT INTO package_projection (
+
+          package_id,
+
+          name,
+
+          lesson_count,
+
+          lesson_duration_minutes,
+
+          base_price,
+
+          service_mode,
+
+          is_active,
+
+          created_at,
+
+          updated_at
+
+        )
+
+        VALUES (
+
+          $1,
+          $2,
+          $3,
+          $4,
+          $5,
+          $6,
+
+          TRUE,
+
+          $7,
+          $7
+
+        )
+
+        ON CONFLICT (package_id)
+
+        DO NOTHING
+
+      `, [
+
+        event.identity_id,
+
+        payload.name,
+
+        payload.lesson_count,
+
+        payload.lesson_duration_minutes,
+
+        payload.base_price,
+
+        payload.service_mode,
+
+        event.created_at
+
+      ]);
+
+    }
+
+  });
+
+}
+
+
+
+async function handlePackageUpdated(
+  client,
+  event,
+  replay = false
+) {
+
+
+console.log(
+  "PACKAGE UPDATED HANDLER START",
+  event.sequence_number
+);
+
+
+  const payload =
+    event.payload;
+
+
+console.log(
+  "PACKAGE UPDATED ABOUT TO CALL PIPELINE",
+  event.sequence_number
+);
+
+  await processProjectionEvent({
+
+    client,
+
+    projectionName:
+      "package_projection",
+
+    event,
+
+    replay,
+
+    processor: async () => {
+
+  console.log(
+    "PACKAGE UPDATED PROCESSOR RUNNING"
+  );
+
+      await client.query(`
+
+        UPDATE package_projection
+
+        SET
+
+          name = $2,
+
+          lesson_count = $3,
+
+          lesson_duration_minutes = $4,
+
+          base_price = $5,
+
+          service_mode = $6,
+
+          updated_at = $7
+
+        WHERE package_id = $1
+
+      `, [
+
+        event.identity_id,
+
+        payload.name,
+
+        payload.lesson_count,
+
+        payload.lesson_duration_minutes,
+
+        payload.base_price,
+
+        payload.service_mode,
+
+        event.created_at
+
+      ]);
+
+ console.log(
+    "PACKAGE UPDATED SQL COMPLETE"
+  );
+
+    }
+
+  });
+
+
+console.log(
+  "PACKAGE UPDATED PIPELINE FINISHED",
+  event.sequence_number
+);
+
+}
+
+
+
+async function handlePackageDeactivated(
+  client,
+  event,
+  replay = false
+) {
+
+  await processProjectionEvent({
+
+    client,
+
+    projectionName:
+      "package_projection",
+
+    event,
+
+    replay,
+
+    processor: async () => {
+
+      await client.query(`
+
+        UPDATE package_projection
+
+        SET
+
+          is_active = FALSE,
+
+          updated_at = $2
+
+        WHERE package_id = $1
+
+      `, [
+
+        event.identity_id,
+
+        event.created_at
+
+      ]);
+
+    }
+
+  });
 
 }

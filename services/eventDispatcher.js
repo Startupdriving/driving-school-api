@@ -8,27 +8,70 @@ export function startEventDispatcher() {
   let running = false;
 
   setInterval(async () => {
-    if (running) return;
-    running = true;
+
+  if (running) {
+    return;
+  }
+
+  running = true;
 
     const client = await pool.connect();
 
     try {
       await client.query("BEGIN");
 
-      const { rows } = await client.query(`
-        SELECT *
-        FROM event
-        WHERE processed = FALSE
-        AND failed = FALSE
-        ORDER BY sequence_number ASC
-        LIMIT 20
-        FOR UPDATE SKIP LOCKED
-      `);
+
+const latest = await client.query(`
+  SELECT
+    sequence_number,
+    event_type,
+    processed
+  FROM event
+  ORDER BY sequence_number DESC
+  LIMIT 5
+`);
+
+
+
+const debugEvent = await client.query(`
+  SELECT
+    sequence_number,
+    event_type,
+    processed,
+    failed
+  FROM event
+  WHERE sequence_number >= 108
+  ORDER BY sequence_number DESC
+`);
+
+
+      const raw = await client.query(`
+  SELECT
+    sequence_number,
+    event_type,
+    processed,
+    failed
+  FROM event
+  WHERE processed = FALSE
+  AND failed = FALSE
+  ORDER BY sequence_number ASC
+  LIMIT 20
+`);
+
+const { rows } = await client.query(`
+  SELECT *
+  FROM event
+  WHERE processed = FALSE
+  AND failed = FALSE
+  ORDER BY sequence_number ASC
+  LIMIT 20
+  FOR UPDATE SKIP LOCKED
+`);
+
+
 
       for (const event of rows) {
   try {
-    console.log("⚙️ PROCESS EVENT:", event.event_type);
 
     await handleEvent(client, event);
 
@@ -88,10 +131,20 @@ if (failed) {
     WHERE id = $1
   `, [event.id]);
 
+const verifyProcessed = await client.query(`
+  SELECT
+    sequence_number,
+    event_type,
+    processed
+  FROM event
+  WHERE id = $1
+`, [event.id]);
+
 }
 
   }
 }
+
 
       await client.query("COMMIT");
 
@@ -100,7 +153,9 @@ if (failed) {
       console.error("EVENT DISPATCH ERROR:", err);
     } finally {
       client.release();
+
       running = false;
+
     }
 
   }, 500);

@@ -44,7 +44,18 @@ export async function withIdempotency(req, handler) {
       [key, responseBody]
     );
 
-    await client.query("COMMIT");
+console.log("ABOUT TO COMMIT IDEMPOTENCY");
+const beforeCommit = await client.query(`
+  SELECT
+    id,
+    sequence_number,
+    processed
+  FROM event
+  WHERE id = $1
+`, [responseBody.event_id]);
+
+await client.query("COMMIT");
+
 
     return responseBody;
 

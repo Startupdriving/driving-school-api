@@ -29,7 +29,6 @@ export async function processProjectionEvent({
   const seq =
     Number(event.sequence_number);
 
-
   const alreadyProcessed =
   await hasProjectionEventProcessed(
     client,
@@ -56,6 +55,15 @@ if (alreadyProcessed) {
 
   await processor();
 
+
+
+console.log(
+  "UPDATING CHECKPOINT:",
+  projectionName,
+  seq
+);
+
+
   await updateProjectionCheckpoint(
     client,
     projectionName,
@@ -64,12 +72,19 @@ if (alreadyProcessed) {
 
 
 
+console.log(
+  "REGISTERING PROJECTION EVENT:",
+  projectionName,
+  event.id
+);
+
      const shouldProcess =
     await registerProjectionEvent(
       client,
       projectionName,
       event.id
     );
+
 
   return true;
 
