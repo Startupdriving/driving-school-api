@@ -19,11 +19,6 @@ export async function handleEvent(
     event.sequence_number
   );
 
-  console.log(
-    "HANDLE EVENT ENTER:",
-    event.event_type,
-    event.sequence_number
-  );
   const { replay = false } = options;
 
   const { event_type } = event;
@@ -79,6 +74,46 @@ case "package_deactivated":
   );
 break;
 
+
+case "enrollment_created":
+
+
+  console.log(
+    "ENROLLMENT CREATED CASE HIT",
+    event.sequence_number
+  );
+
+
+  await handleEnrollmentCreated(
+    client,
+    event,
+    replay
+  );
+
+break;
+
+
+case "enrollment_cancelled":
+
+  await handleEnrollmentCancelled(
+    client,
+    event,
+    replay
+  );
+
+break;
+
+
+case "enrollment_completed":
+
+  await handleEnrollmentCompleted(
+    client,
+    event,
+    replay
+  );
+
+break;
+
     case 'student_updated':
       await handleStudentUpdated(client, event);
     break;
@@ -116,7 +151,7 @@ break;
       break;
 
     case 'lesson_reschedule_requested':
-      await handleLessonRescheduleRequested(client, event);
+      await handleLessonRescheduleRequested(client, event,  replay);
     break;
 
     case "lesson_rescheduled":
@@ -504,8 +539,14 @@ await updateProjectionCheckpoint(
 
 async function handleLessonRescheduleRequested(
   client,
-  event
+  event,
+  replay = false
 ) {
+
+console.log(
+  "RESCHEDULE REQUEST HANDLER START",
+  event.sequence_number
+);
 
   const seq =
     Number(event.sequence_number);
@@ -549,6 +590,20 @@ if (
   }
 
 }
+
+
+await processProjectionEvent({
+
+  client,
+
+  projectionName:
+    "lesson_reschedule_projection",
+
+  event,
+
+  replay,
+
+  processor: async () => {
 
   await client.query(`
     INSERT INTO lesson_reschedule_projection (
@@ -645,6 +700,8 @@ if (
 
 }
 
+});
+}
 
 
 async function handleLessonRescheduleAccepted(client, event) {
@@ -1044,6 +1101,7 @@ await processProjectionEvent({
     payload.lesson_id
   ]);
 
+
   // reschedule projection checkpoint
 
   await updateProjectionCheckpoint(
@@ -1052,16 +1110,47 @@ await processProjectionEvent({
     seq
   );
 
-  await updateProjectionCheckpoint(
-    client,
-    "lesson_reschedule_projection",
-    seq
-  );
-
 
     }
 
   });
+
+await processProjectionEvent({
+
+  client,
+
+  projectionName:
+    "lesson_reschedule_projection",
+
+  event,
+
+  replay,
+
+  processor: async () => {
+
+    console.log(
+      "RESCHEDULE ACCEPT PROCESSOR",
+      event.sequence_number
+    );
+
+    await client.query(`
+      UPDATE lesson_reschedule_projection
+      SET
+        status = 'accepted',
+        response_by = $1,
+        responded_at = $2,
+        updated_at = $2
+      WHERE lesson_id = $3::uuid
+    `, [
+      payload.accepted_by,
+      event.created_at,
+      payload.lesson_id
+    ]);
+
+  }
+
+});
+
 
 }
 
@@ -1361,4 +1450,126 @@ async function handlePackageDeactivated(
 
   });
 
+}
+
+
+
+async function handleEnrollmentCreated(
+  client,
+  event,
+  replay = false
+) {
+
+  console.log(
+    "ENROLLMENT CREATED HANDLER START",
+    event.sequence_number
+  );
+
+  const payload =
+    event.payload;
+
+  console.log(
+    "ENROLLMENT CREATED ABOUT TO CALL PIPELINE",
+    event.sequence_number
+  );
+
+  await processProjectionEvent({
+
+    client,
+
+    projectionName:
+      "enrollment_projection",
+
+    event,
+
+    replay,
+
+    processor: async () => {
+
+      console.log(
+        "ENROLLMENT CREATED PROCESSOR RUNNING"
+      );
+
+      await client.query(`
+
+        INSERT INTO enrollment_projection (
+
+          enrollment_id,
+
+          student_id,
+
+          package_id,
+
+          status,
+
+          created_at,
+
+          updated_at
+
+        )
+
+        VALUES (
+
+          $1,
+          $2,
+          $3,
+
+          'ACTIVE',
+
+          $4,
+          $4
+
+        )
+
+      `, [
+
+        event.identity_id,
+
+        payload.student_id,
+
+        payload.package_id,
+
+        event.created_at
+
+      ]);
+
+      console.log(
+        "ENROLLMENT CREATED SQL COMPLETE"
+      );
+
+    }
+
+  });
+
+  console.log(
+    "ENROLLMENT CREATED PIPELINE FINISHED",
+    event.sequence_number
+  );
+
+}
+
+
+
+async function handleEnrollmentCancelled(
+  client,
+  event,
+  replay = false
+) {
+console.log(
+  "ENROLLMENT CANCELLED HANDLER START",
+  event.sequence_number
+);
+}
+
+
+
+async function handleEnrollmentCompleted(
+  client,
+  event,
+  replay = false
+) {
+console.log(
+  "ENROLLMENT COMPLETED HANDLER START",
+  event.sequence_number
+);
 }

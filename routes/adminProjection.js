@@ -31,6 +31,20 @@ import {
 
 const projectionEventMap = {
 
+
+   package_projection: [
+  "package_created",
+  "package_updated",
+  "package_deactivated"
+],
+
+enrollment_projection: [
+  "enrollment_created",
+  "enrollment_cancelled",
+  "enrollment_completed"
+],
+
+
   lesson_schedule_projection: [
     "lesson_created",
     "lesson_started",

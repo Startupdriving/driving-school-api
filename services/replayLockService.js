@@ -73,21 +73,29 @@ export async function acquireReplayLock(
 
   await client.query(`
 
-    INSERT INTO replay_lock (
+  INSERT INTO replay_lock (
 
-      lock_name,
-      lock_status
+    lock_name,
+    lock_status
 
-    )
+  )
 
-    VALUES (
+  VALUES (
 
-      $1,
-      'active'
+    $1,
+    'active'
 
-    )
+  )
 
-  `, [lockName]);
+  ON CONFLICT (lock_name)
+
+  DO UPDATE SET
+
+    lock_status = 'active',
+    acquired_at = NOW(),
+    released_at = NULL
+
+`, [lockName]);
 
 }
 

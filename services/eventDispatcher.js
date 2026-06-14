@@ -3,7 +3,10 @@ import { handleEvent } from "./eventHandler.js";
 import { handleReliabilityProjection } from "./reliabilityProjectionHandler.js";
 
 export function startEventDispatcher() {
-  console.log("🚀 EVENT DISPATCHER RUNNING");
+  console.log(
+  "🚀 EVENT DISPATCHER RUNNING",
+  process.pid
+);
 
   let running = false;
 
@@ -19,6 +22,10 @@ export function startEventDispatcher() {
 
     try {
       await client.query("BEGIN");
+const count = await client.query(`
+  SELECT COUNT(*) AS total
+  FROM event
+`);
 
 
 const latest = await client.query(`
@@ -68,15 +75,37 @@ const { rows } = await client.query(`
   FOR UPDATE SKIP LOCKED
 `);
 
-
-
       for (const event of rows) {
+console.log(
+  "DISPATCHER PICKED:",
+  event.sequence_number,
+  event.event_type
+);
+
+
+console.log(
+    "LOOP EVENT:",
+    event.sequence_number,
+    event.event_type
+  );
+
   try {
 
     await handleEvent(client, event);
-
+console.log(
+  "HANDLE FINISHED:",
+  event.event_type,
+  event.sequence_number
+);
     await handleReliabilityProjection( client, event);
     // ✅ SUCCESS → mark processed
+
+console.log(
+  "MARKING EVENT PROCESSED:",
+  event.sequence_number,
+  event.event_type
+);
+
     await client.query(`
       UPDATE event
       SET processed = TRUE

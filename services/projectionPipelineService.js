@@ -55,8 +55,6 @@ if (alreadyProcessed) {
 
   await processor();
 
-
-
 console.log(
   "UPDATING CHECKPOINT:",
   projectionName,

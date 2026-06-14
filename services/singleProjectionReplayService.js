@@ -11,6 +11,20 @@ import {
 
 const projectionReplayMap = {
 
+
+  package_projection: [
+    "package_created",
+    "package_updated",
+    "package_deactivated"
+  ],
+
+  enrollment_projection: [
+    "enrollment_created",
+    "enrollment_cancelled",
+    "enrollment_completed"
+  ],
+
+
   lesson_schedule_projection: [
     "lesson_created",
     "lesson_started",
@@ -97,6 +111,13 @@ await acquireReplayLock(
     WHERE projection_name = $1
   `, [projectionName]);
 
+
+
+   await client.query(`
+    DELETE FROM projection_event_log
+    WHERE projection_name = $1
+   `, [projectionName]);
+
   // =====================================================
   // STEP 7 — LOAD RELEVANT EVENTS ONLY
   // =====================================================
@@ -121,7 +142,14 @@ await acquireReplayLock(
 
   for (const event of events) {
 
-    console.log(
+ console.log(
+  "REPLAY EVENT:",
+  event.sequence_number,
+  event.event_type
+); 
+
+
+  console.log(
       `⚙️ SINGLE REPLAY EVENT: ${event.event_type}`
     );
 
