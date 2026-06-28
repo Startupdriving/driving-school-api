@@ -8,6 +8,8 @@ import EventStreamTable
 from "../components/admin/EventStreamTable";
 import EntityTimeline
 from "../components/admin/EntityTimeline";
+import ProjectionVerificationTable
+from "../components/admin/ProjectionVerificationTable";
 
 
 export default function ProjectionMaintenance() {
@@ -38,6 +40,7 @@ export default function ProjectionMaintenance() {
 
     <div className="bg-white shadow rounded p-4 space-y-4">
          <ProjectionHealthTable />
+         <ProjectionVerificationTable />
          <DeadEventTable />
          <EventStreamTable />
          <EntityTimeline />

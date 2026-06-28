@@ -3,7 +3,13 @@ import {
   useState
 } from "react";
 
-import { fetchProjectionHealth, replayProjection }
+
+import {
+  fetchProjectionHealth,
+  replayProjection,
+  resetCheckpoint,
+  verifyProjection
+}
 from "../../api/adminProjectionApi";
 
 
@@ -94,7 +100,7 @@ async function replay(
             </th>
 
             <th className="text-left p-2">
-              Seq
+              Checkpoint
             </th>
 
             <th className="text-left p-2">
@@ -106,7 +112,11 @@ async function replay(
             </th>
 
             <th className="text-left p-2">
-              Healthy
+               Events
+            </th>
+
+            <th className="text-left p-2">
+              Status
             </th>
 
             <th className="text-left p-2">
@@ -144,34 +154,79 @@ async function replay(
               </td>
 
               <td className="p-2">
-
-                {p.healthy
-                  ? "🟢 Healthy"
-                  : "🔴 Lagging"}
+                {p.event_count}
               </td>
 
 
-              <td className="p-2">
+              <td
+               className={`p-2 font-semibold ${
+               p.healthy
+               ? "text-green-600"
+               : "text-red-600"
+               }`}
+               >
 
-  <button
-    className="
-      bg-blue-600
-      text-white
-      px-3
-      py-1
-      rounded
-    "
+              {p.healthy
+              ? "Healthy"
+              : "Lagging"}
 
-    onClick={() =>
-      replay(
-        p.projection_name
-      )
-    }
-  >
-    Replay
-  </button>
+             </td>
 
-</td>
+
+              <td className="p-2 space-x-2">
+
+                <button
+                 className="
+                 bg-blue-600
+                 text-white
+                 px-3
+                 py-1
+                 rounded
+                 "
+                onClick={() =>
+                 replay(
+                  p.projection_name
+                )
+              } 
+            >
+             Replay
+            </button>
+
+           <button
+            className="
+            bg-red-600
+            text-white
+            px-3
+            py-1
+            rounded
+            "
+             onClick={() =>
+              reset(
+               p.projection_name
+             )
+           }
+         >
+           Reset
+         </button>
+
+<button
+  className="
+    bg-green-600
+    text-white
+    px-3
+    py-1
+    rounded
+  "
+  onClick={() =>
+    verify(
+      p.projection_name
+    )
+  }
+>
+  Verify
+</button>
+
+       </td>
 
 
 
@@ -186,5 +241,77 @@ async function replay(
     </div>
 
   );
+
+}
+
+
+async function reset(
+  projectionName
+) {
+
+  const confirmed =
+    window.confirm(
+      `Reset checkpoint for ${projectionName}?`
+    );
+
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+
+    await resetCheckpoint(
+      projectionName
+    );
+
+    await load();
+
+  } catch (err) {
+
+    console.error(err);
+
+  }
+
+}
+
+
+async function verify(
+  projectionName
+) {
+
+  try {
+
+    const result =
+      await verifyProjection(
+        projectionName
+      );
+
+    alert(
+
+      result.healthy
+
+      ? `✅ PASS
+
+Expected: ${result.expected_rows}
+Actual: ${result.actual_rows}`
+
+      : `❌ FAIL
+
+Expected: ${result.expected_rows}
+Actual: ${result.actual_rows}`
+
+    );
+
+  }
+
+  catch (err) {
+
+    console.error(err);
+
+    alert(
+      "Verification failed"
+    );
+
+  }
 
 }

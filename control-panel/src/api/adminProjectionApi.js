@@ -25,3 +25,42 @@ export async function replayProjection(
   return res.data;
 
 }
+
+
+export async function verifyAllProjections() {
+
+  const res = await axios.get(
+    `${API}/admin/verify-all-projections`
+  );
+
+  return res.data;
+
+}
+
+export async function resetCheckpoint(
+  projectionName
+) {
+
+  const res = await axios.post(
+    `${API}/admin/reset-checkpoint/${projectionName}`
+  );
+
+  return res.data;
+
+}
+
+
+export async function verifyProjection(
+  projectionName
+) {
+
+  const res =
+    await axios.get(
+      `${API}/admin/verify-projection/${projectionName}`
+    );
+
+  return res.data;
+
+}
+
+

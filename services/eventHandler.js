@@ -4,6 +4,10 @@ import {  updateProjectionCheckpoint } from "./projectionCheckpointService.js";
 import {
   processProjectionEvent
 } from "./projectionPipelineService.js";
+import * as packageProjectionBuilder
+  from "./projections/packageProjectionBuilder.js";
+
+
 console.log("EVENT HANDLER FILE LOADED");
 
 
@@ -50,7 +54,7 @@ case 'instructor_online':
     break;
 
     case "package_created":
-  await handlePackageCreated(
+   await packageProjectionBuilder.apply(
        client,
        event,
        replay
@@ -365,16 +369,9 @@ async function handleLessonCancelled(
 
   // student dashboard state
   await client.query(`
-    UPDATE student_active_lesson_projection
-    SET
-      status = 'cancelled',
-      cancelled_at = $1::timestamptz,
-      started_at = NULL,
-      completed_at = NULL,
-      updated_at = $1::timestamptz
-    WHERE lesson_id = $2::uuid
+      DELETE FROM student_active_lesson_projection
+  WHERE lesson_id = $1::uuid
   `, [
-    event.created_at,
     event.identity_id
   ]);
 
@@ -999,14 +996,9 @@ await processProjectionEvent({
       event.identity_id]);
 
   await client.query(`
-    UPDATE student_active_lesson_projection
-    SET
-      status = 'completed',
-      completed_at = $1::timestamptz,
-      updated_at = $1::timestamptz
-    WHERE lesson_id = $2::uuid
+      DELETE FROM student_active_lesson_projection
+      WHERE lesson_id = $1::uuid
   `, [
-    event.created_at,
     event.identity_id
   ]);
 

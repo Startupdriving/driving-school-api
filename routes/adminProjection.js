@@ -133,6 +133,82 @@ router.get("/projection-health", async (req, res) => {
         relevantSequence - checkpoint
       );
 
+let eventCount = 0;
+
+switch (p.projection_name) {
+
+  case "enrollment_projection":
+
+    eventCount =
+      Number(
+        (
+          await pool.query(`
+            SELECT COUNT(*)
+            FROM enrollment_projection
+          `)
+        ).rows[0].count
+      );
+
+    break;
+
+  case "package_projection":
+
+    eventCount =
+      Number(
+        (
+          await pool.query(`
+            SELECT COUNT(*)
+            FROM package_projection
+          `)
+        ).rows[0].count
+      );
+
+    break;
+
+  case "lesson_reschedule_projection":
+
+    eventCount =
+      Number(
+        (
+          await pool.query(`
+            SELECT COUNT(*)
+            FROM lesson_reschedule_projection
+          `)
+        ).rows[0].count
+      );
+
+    break;
+
+  case "student_active_lesson_projection":
+
+    eventCount =
+      Number(
+        (
+          await pool.query(`
+            SELECT COUNT(*)
+            FROM student_active_lesson_projection
+          `)
+        ).rows[0].count
+      );
+
+    break;
+
+  case "lesson_offer_negotiation_projection":
+
+    eventCount =
+      Number(
+        (
+          await pool.query(`
+            SELECT COUNT(*)
+            FROM lesson_offer_negotiation_projection
+          `)
+        ).rows[0].count
+      );
+
+    break;
+
+}
+
     return {
 
       projection_name:
@@ -145,6 +221,9 @@ router.get("/projection-health", async (req, res) => {
         relevantSequence,
 
       lag,
+
+      event_count:
+        eventCount,
 
       healthy:
         lag <= 0,
@@ -174,6 +253,239 @@ router.get("/projection-health", async (req, res) => {
   }
 
 });
+
+
+router.post(
+  "/reset-checkpoint/:projectionName",
+  async (req, res) => {
+
+    const { projectionName } =
+      req.params;
+
+    await pool.query(`
+      DELETE FROM projection_checkpoint
+      WHERE projection_name = $1
+    `, [projectionName]);
+
+    res.json({
+      success: true
+    });
+
+  }
+);
+
+
+async function verifyProjection(projectionName) {
+
+  let expected = 0;
+  let actual = 0;
+
+  switch (projectionName) {
+
+    case "enrollment_projection": {
+
+      const expectedRes = await pool.query(`
+        SELECT COUNT(*)
+        FROM event
+        WHERE event_type = 'enrollment_created'
+      `);
+
+      const actualRes = await pool.query(`
+        SELECT COUNT(*)
+        FROM enrollment_projection
+      `);
+
+      expected = Number(expectedRes.rows[0].count);
+      actual = Number(actualRes.rows[0].count);
+
+      break;
+    }
+
+    case "package_projection": {
+
+      const expectedRes = await pool.query(`
+        SELECT COUNT(*)
+        FROM event
+        WHERE event_type = 'package_created'
+      `);
+
+      const actualRes = await pool.query(`
+        SELECT COUNT(*)
+        FROM package_projection
+      `);
+
+      expected = Number(expectedRes.rows[0].count);
+      actual = Number(actualRes.rows[0].count);
+
+      break;
+    }
+
+    case "lesson_reschedule_projection": {
+
+      const expectedRes = await pool.query(`
+        SELECT COUNT(*)
+        FROM event
+        WHERE event_type = 'lesson_reschedule_requested'
+      `);
+
+      const actualRes = await pool.query(`
+        SELECT COUNT(*)
+        FROM lesson_reschedule_projection
+      `);
+
+      expected = Number(expectedRes.rows[0].count);
+      actual = Number(actualRes.rows[0].count);
+
+      break;
+    }
+
+    case "lesson_offer_negotiation_projection": {
+
+      const expectedRes = await pool.query(`
+        SELECT COUNT(*)
+        FROM event
+        WHERE event_type = 'lesson_offer_sent'
+      `);
+
+      const actualRes = await pool.query(`
+        SELECT COUNT(*)
+        FROM lesson_offer_negotiation_projection
+      `);
+
+      expected = Number(expectedRes.rows[0].count);
+      actual = Number(actualRes.rows[0].count);
+
+      break;
+    }
+
+    case "student_active_lesson_projection": {
+
+      const expectedRes = await pool.query(`
+        SELECT COUNT(*)
+        FROM lesson_schedule_projection
+        WHERE status = 'scheduled'
+      `);
+
+      const actualRes = await pool.query(`
+        SELECT COUNT(*)
+        FROM student_active_lesson_projection
+      `);
+
+      expected = Number(expectedRes.rows[0].count);
+      actual = Number(actualRes.rows[0].count);
+
+      break;
+    }
+
+    default:
+      throw new Error("verification_not_supported");
+
+  }
+
+  return {
+
+    projection_name: projectionName,
+
+    expected_rows: expected,
+
+    actual_rows: actual,
+
+    healthy: expected === actual
+
+  };
+
+}
+
+
+
+router.get(
+  "/verify-projection/:projectionName",
+  async (req, res) => {
+
+    try {
+
+      const result =
+        await verifyProjection(
+          req.params.projectionName
+        );
+
+      res.json(result);
+
+    } catch (err) {
+
+      console.error(err);
+
+      res.status(500).json({
+        error: err.message
+      });
+
+    }
+
+  }
+);
+
+
+
+router.get(
+  "/verify-all-projections",
+  async (req, res) => {
+
+    try {
+
+      const projectionNames = [
+
+        "enrollment_projection",
+
+        "package_projection",
+
+        "lesson_reschedule_projection",
+
+        "lesson_offer_negotiation_projection",
+
+        "student_active_lesson_projection"
+
+      ];
+
+      const results = [];
+
+      for (const projectionName of projectionNames) {
+
+        const result =
+          await verifyProjection(
+            projectionName
+          );
+
+        results.push(result);
+
+      }
+
+      res.json({
+
+        healthy:
+          results.every(
+            r => r.healthy
+          ),
+
+        projections:
+          results
+
+      });
+
+    } catch (err) {
+
+      console.error(err);
+
+      res.status(500).json({
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+);
 
 
 router.get("/dead-events", async (req, res) => {

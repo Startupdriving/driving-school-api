@@ -136,6 +136,12 @@ await acquireReplayLock(
 
     `, [relevantEvents]);
 
+console.log(
+  "REPLAY LOADED EVENTS:",
+  projectionName,
+  events.length
+);
+
   // =====================================================
   // STEP 8 — REPLAY ONLY TARGET EVENTS
   // =====================================================
@@ -145,7 +151,8 @@ await acquireReplayLock(
  console.log(
   "REPLAY EVENT:",
   event.sequence_number,
-  event.event_type
+  event.event_type,
+  event.identity_id
 ); 
 
 
