@@ -63,7 +63,7 @@ case 'instructor_online':
 
 
 case "package_updated":
-  await handlePackageUpdated(
+  await packageProjectionBuilder.apply(
     client,
     event,
     replay
@@ -71,7 +71,7 @@ case "package_updated":
 break;
 
 case "package_deactivated":
-  await handlePackageDeactivated(
+    await packageProjectionBuilder.apply(
     client,
     event,
     replay
@@ -1320,11 +1320,6 @@ console.log(
   const payload =
     event.payload;
 
-
-console.log(
-  "PACKAGE UPDATED ABOUT TO CALL PIPELINE",
-  event.sequence_number
-);
 
   await processProjectionEvent({
 
