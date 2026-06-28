@@ -11,21 +11,21 @@ export async function apply(
   switch (event.event_type) {
 
     case "package_created":
-      return applyPackageCreated(
+      return onPackageCreated(
         client,
         event,
         replay
       );
 
     case "package_updated":
-      return applyPackageUpdated(
+      return onPackageUpdated(
         client,
         event,
         replay
     );
 
     case "package_deactivated":
-      return applyPackageDeactivated(
+      return onPackageDeactivated(
         client,
         event,
         replay
@@ -35,7 +35,7 @@ export async function apply(
 
 }
 
-async function applyPackageCreated(
+async function onPackageCreated(
   client,
   event,
   replay
@@ -126,7 +126,7 @@ const payload = event.payload;
 
 
 
-async function applyPackageUpdated(
+async function onPackageUpdated(
   client,
   event,
   replay
@@ -196,7 +196,7 @@ async function applyPackageUpdated(
 
 
 
-async function applyPackageDeactivated(
+async function onPackageDeactivated(
   client,
   event,
   replay
