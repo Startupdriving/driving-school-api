@@ -6,6 +6,10 @@ import {
 } from "./projectionPipelineService.js";
 import * as packageProjectionBuilder
   from "./projections/packageProjectionBuilder.js";
+import * as enrollmentProjectionBuilder
+  from "./projections/enrollmentProjectionBuilder.js";
+import * as studentEntitlementProjectionBuilder
+  from "./projections/studentEntitlementProjectionBuilder.js";
 
 
 console.log("EVENT HANDLER FILE LOADED");
@@ -80,15 +84,7 @@ break;
 
 
 case "enrollment_created":
-
-
-  console.log(
-    "ENROLLMENT CREATED CASE HIT",
-    event.sequence_number
-  );
-
-
-  await handleEnrollmentCreated(
+  await enrollmentProjectionBuilder.apply(
     client,
     event,
     replay
@@ -117,6 +113,25 @@ case "enrollment_completed":
   );
 
 break;
+
+
+case "entitlement_created":
+
+case "entitlement_reserved":
+
+case "entitlement_released":
+
+case "entitlement_consumed":
+
+case "entitlement_expired":
+
+case "entitlement_adjusted":
+
+  return studentEntitlementProjectionBuilder.apply(
+    client,
+    event,
+    replay
+  );
 
     case 'student_updated':
       await handleStudentUpdated(client, event);
@@ -1211,18 +1226,9 @@ async function handleEnrollmentCreated(
   replay = false
 ) {
 
-  console.log(
-    "ENROLLMENT CREATED HANDLER START",
-    event.sequence_number
-  );
 
   const payload =
     event.payload;
-
-  console.log(
-    "ENROLLMENT CREATED ABOUT TO CALL PIPELINE",
-    event.sequence_number
-  );
 
   await processProjectionEvent({
 
@@ -1236,10 +1242,6 @@ async function handleEnrollmentCreated(
     replay,
 
     processor: async () => {
-
-      console.log(
-        "ENROLLMENT CREATED PROCESSOR RUNNING"
-      );
 
       await client.query(`
 
@@ -1284,18 +1286,9 @@ async function handleEnrollmentCreated(
 
       ]);
 
-      console.log(
-        "ENROLLMENT CREATED SQL COMPLETE"
-      );
-
     }
 
   });
-
-  console.log(
-    "ENROLLMENT CREATED PIPELINE FINISHED",
-    event.sequence_number
-  );
 
 }
 
