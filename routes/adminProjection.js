@@ -45,6 +45,16 @@ enrollment_projection: [
 ],
 
 
+student_entitlement_projection: [
+  "entitlement_created",
+  "entitlement_reserved",
+  "entitlement_released",
+  "entitlement_consumed",
+  "entitlement_expired",
+  "entitlement_adjusted"
+],
+
+
   lesson_schedule_projection: [
     "lesson_created",
     "lesson_started",
@@ -164,6 +174,22 @@ switch (p.projection_name) {
       );
 
     break;
+
+
+   case "student_entitlement_projection":
+
+  eventCount =
+    Number(
+      (
+        await pool.query(`
+          SELECT COUNT(*)
+          FROM student_entitlement_projection
+        `)
+      ).rows[0].count
+    );
+
+  break;
+
 
   case "lesson_reschedule_projection":
 
@@ -301,6 +327,26 @@ async function verifyProjection(projectionName) {
       break;
     }
 
+   case "student_entitlement_projection": {
+
+  const expectedRes = await pool.query(`
+    SELECT COUNT(*)
+    FROM event
+    WHERE event_type = 'entitlement_created'
+  `);
+
+  const actualRes = await pool.query(`
+    SELECT COUNT(*)
+    FROM student_entitlement_projection
+  `);
+
+  expected = Number(expectedRes.rows[0].count);
+  actual = Number(actualRes.rows[0].count);
+
+  break;
+}
+
+
     case "package_projection": {
 
       const expectedRes = await pool.query(`
@@ -435,6 +481,8 @@ router.get(
       const projectionNames = [
 
         "enrollment_projection",
+
+        "student_entitlement_projection",
 
         "package_projection",
 

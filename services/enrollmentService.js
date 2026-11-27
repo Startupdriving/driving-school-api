@@ -3,6 +3,15 @@ import crypto from "crypto";
 import {
   insertEvent
 } from "./eventStore.js";
+import {
+  createEntitlementCommand
+} from "./commands/entitlementCommands.js";
+
+import {
+  createEntitlement
+} from "./aggregates/studentEntitlementAggregate.js";
+
+
 
 
 
@@ -37,11 +46,19 @@ console.log(
 
   const packageRes =
     await client.query(`
-      SELECT 1
-      FROM package_projection
-      WHERE package_id = $1
-      AND is_active = TRUE
-      LIMIT 1
+      SELECT
+
+     package_id,
+
+    lesson_count
+
+    FROM package_projection
+
+    WHERE package_id = $1
+
+    AND is_active = TRUE
+
+    LIMIT 1
     `, [
       data.package_id
     ]);
@@ -59,6 +76,9 @@ console.log(
     );
   }
 
+
+const lessonCredits =
+  packageRes.rows[0].lesson_count;
 
   const enrollmentId =
     crypto.randomUUID();
@@ -88,6 +108,10 @@ console.log(
         identity_id:
           enrollmentId,
 
+        aggregate_type:
+          "enrollment",
+
+
         event_type:
           "enrollment_created",
 
@@ -104,6 +128,37 @@ console.log(
       }
     );
 
+const command =
+  createEntitlementCommand({
+
+    studentId:
+      data.student_id,
+
+    enrollmentId:
+      enrollmentId,
+
+    packageId:
+      data.package_id,
+
+    credits:
+      lessonCredits,
+
+    createdBy:
+      "SYSTEM",
+
+    reason:
+      "PACKAGE_PURCHASE"
+
+  });
+
+
+await createEntitlement(
+
+  client,
+
+  command
+
+);
 
   return event;
 

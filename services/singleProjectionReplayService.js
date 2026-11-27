@@ -25,6 +25,23 @@ const projectionReplayMap = {
   ],
 
 
+  student_entitlement_projection: [
+
+  "entitlement_created",
+
+  "entitlement_reserved",
+
+  "entitlement_released",
+
+  "entitlement_consumed",
+
+  "entitlement_expired",
+
+  "entitlement_adjusted"
+
+],
+
+
   lesson_schedule_projection: [
     "lesson_created",
     "lesson_started",

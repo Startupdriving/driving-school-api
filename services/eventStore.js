@@ -7,6 +7,7 @@ export async function insertEvent(client, {
   id,
   identity_id,
   event_type,
+  aggregate_type = null,
   payload,
 
   correlation_id = null,
@@ -63,6 +64,7 @@ const nextVersion =
     INSERT INTO event (
   id,
   identity_id,
+  aggregate_type,
   event_type,
   payload,
   correlation_id,
@@ -71,11 +73,12 @@ const nextVersion =
   lesson_range,
   stream_version
 )
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
      RETURNING *
   `, [
   id,
   identity_id,
+  aggregate_type,
   event_type,
   payload,
   correlation_id,
@@ -104,5 +107,34 @@ console.log(
 
 
    return rows[0];
+
+}
+
+
+export async function loadAggregateEvents(
+  client,
+  identityId
+) {
+
+  const { rows } =
+    await client.query(`
+
+      SELECT *
+
+      FROM event
+
+      WHERE identity_id = $1
+
+      AND is_valid = TRUE
+
+      ORDER BY stream_version ASC
+
+    `, [
+
+      identityId
+
+    ]);
+
+  return rows;
 
 }
